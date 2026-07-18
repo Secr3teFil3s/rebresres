@@ -39,6 +39,10 @@ local AIM_MIN_DISTANCE = 25
 local AIM_MAX_LIMIT = 1000
 local AIM_DISTANCE_STEP = 25
 
+-- Tecla padrão para ativar/desativar o AimLock.
+-- Pode ser alterada pelo próprio painel.
+local AIM_TOGGLE_KEY = Enum.KeyCode.Q
+
 --========================================================--
 -- ESTADOS
 --========================================================--
@@ -53,6 +57,7 @@ local gunDropFound = false
 local aimlockEnabled = false
 local rightMouseHeld = false
 local selectedTarget = nil
+local waitingAimKeybind = false
 
 local minimized = false
 local destroyed = false
@@ -697,14 +702,100 @@ local GUNDROP_COLOR =
 	)
 
 
+-- Verifica se um objeto está dentro do Character de algum jogador.
+-- Isso é importante porque, quando a arma é pega/equipada, ela pode
+-- continuar existindo dentro da Workspace, mas passa a ficar dentro
+-- do Model do jogador. Nesse caso ela NÃO deve mais ser tratada como drop.
+local function isInsidePlayerCharacter(instance)
+
+	if not instance then
+		return false
+	end
+
+	for _, player
+		in ipairs(
+			Players:GetPlayers()
+		)
+	do
+
+		local character =
+			player.Character
+
+		if character
+			and instance:IsDescendantOf(character)
+		then
+
+			return true
+
+		end
+
+	end
+
+	return false
+
+end
+
+
+local function isValidGunDrop(gunDrop)
+
+	if not gunDrop
+		or not gunDrop.Parent
+	then
+
+		return false
+
+	end
+
+	-- Precisa continuar realmente dentro da Workspace.
+	if not gunDrop:IsDescendantOf(workspace) then
+		return false
+	end
+
+	-- Se foi equipado por algum jogador, deixa de ser um drop válido.
+	if isInsidePlayerCharacter(gunDrop) then
+		return false
+	end
+
+	-- Proteção extra caso GunDrop seja um filho de uma Tool equipada.
+	local toolAncestor =
+		gunDrop:FindFirstAncestorOfClass(
+			"Tool"
+		)
+
+	if toolAncestor
+		and isInsidePlayerCharacter(toolAncestor)
+	then
+
+		return false
+
+	end
+
+	return true
+
+end
+
+
 local function findGunDrop()
 
-	-- Procura em qualquer lugar dentro da Workspace,
-	-- independentemente do mapa/pasta em que o objeto esteja.
-	return workspace:FindFirstChild(
-		"GunDrop",
-		true
-	)
+	-- Procura em qualquer lugar da Workspace, mas ignora GunDrop
+	-- que já tenha sido pego e esteja dentro do Character de alguém.
+	for _, object
+		in ipairs(
+			workspace:GetDescendants()
+		)
+	do
+
+		if object.Name == "GunDrop"
+			and isValidGunDrop(object)
+		then
+
+			return object
+
+		end
+
+	end
+
+	return nil
 
 end
 
@@ -752,6 +843,34 @@ local function getGunDropAdornee(gunDrop)
 end
 
 
+-- Remove qualquer ESP antigo que tenha ficado órfão na Workspace.
+-- Isso resolve casos em que a arma foi coletada/reparentada e a referência
+-- local do Billboard ficou desatualizada.
+local function removeStaleGunDropBillboards()
+
+	for _, object
+		in ipairs(
+			workspace:GetDescendants()
+		)
+	do
+
+		if object:IsA("BillboardGui")
+			and object.Name == "B1tSampl3_GunDropESP"
+		then
+
+			pcall(
+				function()
+					object:Destroy()
+				end
+			)
+
+		end
+
+	end
+
+end
+
+
 local function removeGunDropESP()
 
 	if GunDropBillboard then
@@ -764,6 +883,9 @@ local function removeGunDropESP()
 
 	end
 
+	-- Limpa também qualquer Billboard órfão que tenha sobrado.
+	removeStaleGunDropBillboards()
+
 	GunDropBillboard = nil
 	CurrentGunDrop = nil
 	gunDropFound = false
@@ -773,12 +895,18 @@ end
 
 local function createGunDropESP(gunDrop)
 
+	if not isValidGunDrop(gunDrop) then
+		return nil
+	end
+
 	local adornee =
 		getGunDropAdornee(
 			gunDrop
 		)
 
-	if not adornee then
+	if not adornee
+		or not adornee.Parent
+	then
 		return nil
 	end
 
@@ -822,7 +950,6 @@ local function createGunDropESP(gunDrop)
 	Billboard.MaxDistance =
 		5000
 
-	-- Mantém o Billboard preso à própria peça da arma.
 	Billboard.Parent =
 		adornee
 
@@ -942,13 +1069,20 @@ local function updateGunDropESP()
 	local gunDrop =
 		findGunDrop()
 
-	-- Quando não existir mais GunDrop, o ESP some sozinho.
-	if not gunDrop
-		or not gunDrop.Parent
-	then
+	-- Nenhum drop válido existe mais: remove o ESP imediatamente.
+	if not gunDrop then
 
 		removeGunDropESP()
 		return
+
+	end
+
+	-- Se a referência anterior foi pega/equipada, ela deixa de ser válida.
+	if CurrentGunDrop
+		and not isValidGunDrop(CurrentGunDrop)
+	then
+
+		removeGunDropESP()
 
 	end
 
@@ -959,6 +1093,8 @@ local function updateGunDropESP()
 
 	if not adornee
 		or not adornee.Parent
+		or not adornee:IsDescendantOf(workspace)
+		or isInsidePlayerCharacter(adornee)
 	then
 
 		removeGunDropESP()
@@ -966,10 +1102,12 @@ local function updateGunDropESP()
 
 	end
 
-	-- Se apareceu outra GunDrop ou o ESP ainda não existe, recria.
+	-- Se apareceu outra GunDrop, o Billboard sumiu, ou o Billboard ficou
+	-- preso em uma peça antiga, recria do zero.
 	if CurrentGunDrop ~= gunDrop
 		or not GunDropBillboard
 		or not GunDropBillboard.Parent
+		or GunDropBillboard.Adornee ~= adornee
 	then
 
 		createGunDropESP(
@@ -978,8 +1116,20 @@ local function updateGunDropESP()
 
 	end
 
-	if not GunDropBillboard then
+	if not GunDropBillboard
+		or not GunDropBillboard.Parent
+	then
 		return
+	end
+
+	-- Validação final a cada atualização para evitar ESP fantasma.
+	if not isValidGunDrop(gunDrop)
+		or isInsidePlayerCharacter(gunDrop)
+	then
+
+		removeGunDropESP()
+		return
+
 	end
 
 	gunDropFound =
@@ -1071,7 +1221,7 @@ local NORMAL_SIZE =
 		0,
 		370,
 		0,
-		840
+		920
 	)
 
 local MINIMIZED_SIZE =
@@ -1748,6 +1898,23 @@ local AimDistancePlus =
 	)
 
 --========================================================--
+-- TECLA DO AIMLOCK
+--========================================================--
+
+local AimKeybindLabel =
+	newLabel(
+		"Tecla AimLock: Q",
+		680
+	)
+
+
+local AimKeybindButton =
+	newButton(
+		"DEFINIR TECLA",
+		710
+	)
+
+--========================================================--
 -- LISTA DE JOGADORES
 --========================================================--
 
@@ -1860,7 +2027,7 @@ PlayerListPadding.Parent =
 local AimInfo =
 	newLabel(
 		"Segure botão direito para travar no alvo",
-		690
+		765
 	)
 
 AimInfo.TextColor3 =
@@ -2115,6 +2282,58 @@ local function updateInterface()
 				210,
 				120,
 				20
+			)
+
+	end
+
+	--------------------------------------------------
+	-- TECLA DO AIMLOCK
+	--------------------------------------------------
+
+	if waitingAimKeybind then
+
+		AimKeybindLabel.Text =
+			"Tecla AimLock: aguardando..."
+
+		AimKeybindLabel.TextColor3 =
+			Color3.fromRGB(
+				255,
+				200,
+				70
+			)
+
+		AimKeybindButton.Text =
+			"PRESSIONE UMA TECLA..."
+
+		AimKeybindButton.BackgroundColor3 =
+			Color3.fromRGB(
+				190,
+				130,
+				30
+			)
+
+	else
+
+		AimKeybindLabel.Text =
+			"Tecla AimLock: "
+			..
+			AIM_TOGGLE_KEY.Name
+
+		AimKeybindLabel.TextColor3 =
+			Color3.fromRGB(
+				255,
+				255,
+				255
+			)
+
+		AimKeybindButton.Text =
+			"DEFINIR TECLA"
+
+		AimKeybindButton.BackgroundColor3 =
+			Color3.fromRGB(
+				80,
+				80,
+				160
 			)
 
 	end
@@ -2510,24 +2729,47 @@ trackConnection(
 -- AIMLOCK CONTROLES
 --========================================================--
 
+local function toggleAimlock()
+
+	aimlockEnabled =
+		not aimlockEnabled
+
+	if not aimlockEnabled then
+
+		rightMouseHeld =
+			false
+
+		UserInputService.MouseBehavior =
+			Enum.MouseBehavior.Default
+
+	end
+
+	updateInterface()
+
+end
+
+
 trackConnection(
 	ToggleAim
 		.MouseButton1Click:
 		Connect(
 			function()
 
-				aimlockEnabled =
-					not aimlockEnabled
+				toggleAimlock()
 
-				if not aimlockEnabled then
+			end
+		)
+)
 
-					rightMouseHeld =
-						false
 
-					UserInputService.MouseBehavior =
-						Enum.MouseBehavior.Default
+trackConnection(
+	AimKeybindButton
+		.MouseButton1Click:
+		Connect(
+			function()
 
-				end
+				waitingAimKeybind =
+					not waitingAimKeybind
 
 				updateInterface()
 
@@ -2782,9 +3024,69 @@ trackConnection(
 				gameProcessed
 			)
 
+				--------------------------------------------------
+				-- DEFINIR NOVA TECLA DO AIMLOCK
+				--------------------------------------------------
+
+				if waitingAimKeybind then
+
+					if input.UserInputType
+						==
+						Enum.UserInputType.Keyboard
+					then
+
+						if input.KeyCode
+							==
+							Enum.KeyCode.Escape
+						then
+
+							-- ESC apenas cancela a troca de tecla.
+							waitingAimKeybind =
+								false
+
+						else
+
+							AIM_TOGGLE_KEY =
+								input.KeyCode
+
+							waitingAimKeybind =
+								false
+
+						end
+
+						updateInterface()
+
+						return
+
+					end
+
+				end
+
 				if gameProcessed then
 					return
 				end
+
+				--------------------------------------------------
+				-- ATIVAR / DESATIVAR AIMLOCK PELA TECLA
+				--------------------------------------------------
+
+				if input.UserInputType
+					==
+					Enum.UserInputType.Keyboard
+					and input.KeyCode
+						==
+						AIM_TOGGLE_KEY
+				then
+
+					toggleAimlock()
+
+					return
+
+				end
+
+				--------------------------------------------------
+				-- BOTÃO DIREITO PARA TRAVAR NO ALVO
+				--------------------------------------------------
 
 				if input.UserInputType
 					==
@@ -3147,6 +3449,9 @@ local function cleanup()
 		false
 
 	aimlockEnabled =
+		false
+
+	waitingAimKeybind =
 		false
 
 	rightMouseHeld =
