@@ -197,90 +197,85 @@ end
 -- ESP
 --========================================================--
 
---========================================================--
--- DETECTAR ARMA / FACA NO CHARACTER
--- Gun   = azul
--- Knife = vermelho
--- Nenhum = verde
---========================================================--
-
+-- Detecta Gun/Knife exatamente onde o jogo coloca as Tools:
+-- 1) Guardada: Player.Backpack.Gun / Player.Backpack.Knife
+-- 2) Equipada: Workspace.NomeDoPlayer.Gun / Workspace.NomeDoPlayer.Knife
+-- Knife tem prioridade (vermelho), depois Gun (azul), sem arma fica verde.
 local function getPlayerWeaponColor(player)
 
+	-- Backpack fica dentro do objeto Player.
+	local backpack =
+		player:FindFirstChild("Backpack")
+
+	-- Quando equipada, a Tool vira filha direta do Character/Model na Workspace.
 	local character =
-		player.Character
-
-	if not character then
-
-		return Color3.fromRGB(
-			0,
-			255,
-			100
+		workspace:FindFirstChild(
+			player.Name
 		)
+		or player.Character
 
-	end
+	local hasGun = false
+	local hasKnife = false
 
-	local hasGun =
-		false
+	--------------------------------------------------
+	-- PROCURAR NO BACKPACK (GUARDADA)
+	--------------------------------------------------
 
-	local hasKnife =
-		false
+	if backpack then
 
-	-- Procura Tools dentro do Model/Character do player na Workspace.
-	-- Isso detecta as ferramentas que estão atualmente equipadas.
-	for _, object
-		in ipairs(
-			character:GetDescendants()
-		)
-	do
+		if backpack:FindFirstChild("Knife") then
+			hasKnife = true
+		end
 
-		if object:IsA(
-			"Tool"
-		) then
-
-			if object.Name
-				==
-				"Gun"
-			then
-
-				hasGun =
-					true
-
-			elseif object.Name
-				==
-				"Knife"
-			then
-
-				hasKnife =
-					true
-
-			end
-
+		if backpack:FindFirstChild("Gun") then
+			hasGun = true
 		end
 
 	end
 
-	-- Se houver as duas Tools ao mesmo tempo,
-	-- Gun tem prioridade e mantém o nome azul.
+	--------------------------------------------------
+	-- PROCURAR NO MODEL DA WORKSPACE (EQUIPADA)
+	--------------------------------------------------
+
+	if character then
+
+		if character:FindFirstChild("Knife") then
+			hasKnife = true
+		end
+
+		if character:FindFirstChild("Gun") then
+			hasGun = true
+		end
+
+	end
+
+	--------------------------------------------------
+	-- CORES DO ESP
+	--------------------------------------------------
+
+	-- Knife = vermelho
+	if hasKnife then
+
+		return Color3.fromRGB(
+			255,
+			50,
+			50
+		)
+
+	end
+
+	-- Gun = azul
 	if hasGun then
 
 		return Color3.fromRGB(
 			0,
-			170,
+			140,
 			255
 		)
 
 	end
 
-	if hasKnife then
-
-		return Color3.fromRGB(
-			255,
-			60,
-			60
-		)
-
-	end
-
+	-- Sem arma = verde
 	return Color3.fromRGB(
 		0,
 		255,
@@ -288,7 +283,6 @@ local function getPlayerWeaponColor(player)
 	)
 
 end
-
 
 local function getESP(player)
 
@@ -596,8 +590,7 @@ local function updateESP(player)
 			..
 			"]"
 
-		-- Atualiza a cor do nome em tempo real:
-		-- Gun = azul | Knife = vermelho | sem arma = verde
+		-- Atualiza a cor do nome em tempo real conforme a Tool detectada.
 		NameLabel.TextColor3 =
 			getPlayerWeaponColor(
 				player
