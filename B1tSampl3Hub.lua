@@ -1793,7 +1793,7 @@ trackConnection(
 
 trackConnection(
 	SizeMinus
-		MouseButton1Click:
+		.MouseButton1Click:
 		Connect(
 			function()
 
