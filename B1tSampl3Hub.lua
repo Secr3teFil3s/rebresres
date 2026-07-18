@@ -93,6 +93,7 @@ local waitingHubKeybind = false
 local currentTab = "ESP"
 
 local OriginalProperties = {}
+local HitboxNoCollisionConstraints = {}
 local Connections = {}
 local GunDropEntries = {}
 local updateInterface
@@ -167,7 +168,80 @@ local function saveOriginalProperties(rootPart)
 		BrickColor = rootPart.BrickColor,
 		Material = rootPart.Material,
 		CanCollide = rootPart.CanCollide,
+		CanTouch = rootPart.CanTouch,
 	}
+end
+
+local function clearHitboxCollisionConstraintsForRoot(rootPart)
+	local constraints = HitboxNoCollisionConstraints[rootPart]
+	if not constraints then
+		return
+	end
+
+	for localPart, constraint in pairs(constraints) do
+		if constraint then
+			pcall(function()
+				constraint:Destroy()
+			end)
+		end
+		constraints[localPart] = nil
+	end
+
+	HitboxNoCollisionConstraints[rootPart] = nil
+end
+
+local function clearAllHitboxCollisionConstraints()
+	local roots = {}
+
+	for rootPart in pairs(HitboxNoCollisionConstraints) do
+		table.insert(roots, rootPart)
+	end
+
+	for _, rootPart in ipairs(roots) do
+		clearHitboxCollisionConstraintsForRoot(rootPart)
+	end
+end
+
+local function ensureNoCollisionWithLocalPlayer(rootPart)
+	local localCharacter = LocalPlayer.Character
+	if not localCharacter or not rootPart or not rootPart.Parent then
+		return
+	end
+
+	local constraints = HitboxNoCollisionConstraints[rootPart]
+	if not constraints then
+		constraints = {}
+		HitboxNoCollisionConstraints[rootPart] = constraints
+	end
+
+	-- Garante que a hitbox aumentada nunca bloqueie fisicamente o jogador local,
+	-- mesmo se algum script do jogo tentar reativar a colisão da HumanoidRootPart.
+	for _, localPart in ipairs(localCharacter:GetDescendants()) do
+		if localPart:IsA("BasePart") then
+			local constraint = constraints[localPart]
+
+			if not constraint or not constraint.Parent then
+				constraint = Instance.new("NoCollisionConstraint")
+				constraint.Name = "B1tSampl3_HitboxNoCollision"
+				constraint.Part0 = localPart
+				constraint.Part1 = rootPart
+				constraint.Parent = rootPart
+				constraints[localPart] = constraint
+			end
+		end
+	end
+
+	-- Remove referências antigas depois de respawn do jogador local.
+	for localPart, constraint in pairs(constraints) do
+		if not localPart.Parent or not localPart:IsDescendantOf(localCharacter) then
+			if constraint then
+				pcall(function()
+					constraint:Destroy()
+				end)
+			end
+			constraints[localPart] = nil
+		end
+	end
 end
 
 local function applyHitbox(player)
@@ -191,10 +265,19 @@ local function applyHitbox(player)
 	rootPart.Transparency = HITBOX_TRANSPARENCY
 	rootPart.BrickColor = BrickColor.new("Really blue")
 	rootPart.Material = Enum.Material.Neon
+
+	-- A própria peça expandida nunca deve ter colisão física ou disparar Touch.
 	rootPart.CanCollide = false
+	rootPart.CanTouch = false
+
+	-- Camada extra de proteção: impede colisão entre a hitbox e todas as partes
+	-- do personagem local sem alterar CanQuery, mantendo a peça detectável por raycast.
+	ensureNoCollisionWithLocalPlayer(rootPart)
 end
 
 local function restoreAllHitboxes()
+	clearAllHitboxCollisionConstraints()
+
 	for rootPart, original in pairs(OriginalProperties) do
 		if rootPart and rootPart.Parent and original then
 			pcall(function()
@@ -203,6 +286,7 @@ local function restoreAllHitboxes()
 				rootPart.BrickColor = original.BrickColor
 				rootPart.Material = original.Material
 				rootPart.CanCollide = original.CanCollide
+				rootPart.CanTouch = original.CanTouch
 			end)
 		end
 		OriginalProperties[rootPart] = nil
@@ -1320,7 +1404,7 @@ local WeaponLegend = Instance.new("TextLabel")
 WeaponLegend.Size = UDim2.new(1, -316, 0, 72)
 WeaponLegend.Position = UDim2.new(0, 306, 0, 78)
 WeaponLegend.BackgroundTransparency = 1
-WeaponLegend.Text = "● Murder: vermelho\n● Sheriff: azul\n● Innocent: verde"
+WeaponLegend.Text = "● Murder: Vermelho\n● Sheriff: Azul\n● Innocent: Verde"
 WeaponLegend.TextColor3 = Theme.Muted
 WeaponLegend.TextSize = 11
 WeaponLegend.Font = Enum.Font.Gotham
