@@ -1,6 +1,6 @@
 --========================================================--
 -- B1tSampl3 HUB
--- HitBox + ESP Name + ESP Distance + AimLock
+-- HitBox + ESP Name + ESP Distance + GunDrop ESP + AimLock
 --========================================================--
 
 local Players = game:GetService("Players")
@@ -47,6 +47,8 @@ local hitboxEnabled = false
 
 local espNameEnabled = false
 local espDistanceEnabled = false
+local gunDropESPEnabled = false
+local gunDropFound = false
 
 local aimlockEnabled = false
 local rightMouseHeld = false
@@ -58,6 +60,9 @@ local destroyed = false
 local OriginalProperties = {}
 
 local Connections = {}
+
+local CurrentGunDrop = nil
+local GunDropBillboard = nil
 
 --========================================================--
 -- CONEXÕES
@@ -681,6 +686,352 @@ local function removeAllESP()
 end
 
 --========================================================--
+-- ESP GUNDROP
+--========================================================--
+
+local GUNDROP_COLOR =
+	Color3.fromRGB(
+		255,
+		140,
+		0
+	)
+
+
+local function findGunDrop()
+
+	-- Procura em qualquer lugar dentro da Workspace,
+	-- independentemente do mapa/pasta em que o objeto esteja.
+	return workspace:FindFirstChild(
+		"GunDrop",
+		true
+	)
+
+end
+
+
+local function getGunDropAdornee(gunDrop)
+
+	if not gunDrop then
+		return nil
+	end
+
+	-- Caso o próprio GunDrop seja uma Part/MeshPart/etc.
+	if gunDrop:IsA("BasePart") then
+		return gunDrop
+	end
+
+	-- Caso seja Tool, tenta primeiro o Handle.
+	if gunDrop:IsA("Tool") then
+
+		local handle =
+			gunDrop:FindFirstChild(
+				"Handle"
+			)
+
+		if handle
+			and handle:IsA("BasePart")
+		then
+			return handle
+		end
+
+	end
+
+	-- Caso seja Model, usa PrimaryPart quando existir.
+	if gunDrop:IsA("Model")
+		and gunDrop.PrimaryPart
+	then
+		return gunDrop.PrimaryPart
+	end
+
+	-- Fallback para qualquer BasePart dentro do GunDrop.
+	return gunDrop:FindFirstChildWhichIsA(
+		"BasePart",
+		true
+	)
+
+end
+
+
+local function removeGunDropESP()
+
+	if GunDropBillboard then
+
+		pcall(
+			function()
+				GunDropBillboard:Destroy()
+			end
+		)
+
+	end
+
+	GunDropBillboard = nil
+	CurrentGunDrop = nil
+	gunDropFound = false
+
+end
+
+
+local function createGunDropESP(gunDrop)
+
+	local adornee =
+		getGunDropAdornee(
+			gunDrop
+		)
+
+	if not adornee then
+		return nil
+	end
+
+	removeGunDropESP()
+
+	CurrentGunDrop =
+		gunDrop
+
+	gunDropFound =
+		true
+
+	local Billboard =
+		Instance.new(
+			"BillboardGui"
+		)
+
+	Billboard.Name =
+		"B1tSampl3_GunDropESP"
+
+	Billboard.Adornee =
+		adornee
+
+	Billboard.Size =
+		UDim2.new(
+			0,
+			220,
+			0,
+			60
+		)
+
+	Billboard.StudsOffset =
+		Vector3.new(
+			0,
+			2.5,
+			0
+		)
+
+	Billboard.AlwaysOnTop =
+		true
+
+	Billboard.MaxDistance =
+		5000
+
+	-- Mantém o Billboard preso à própria peça da arma.
+	Billboard.Parent =
+		adornee
+
+	local NameLabel =
+		Instance.new(
+			"TextLabel"
+		)
+
+	NameLabel.Name =
+		"DropNameLabel"
+
+	NameLabel.Size =
+		UDim2.new(
+			1,
+			0,
+			0,
+			30
+		)
+
+	NameLabel.BackgroundTransparency =
+		1
+
+	NameLabel.Text =
+		"GUN DROP"
+
+	NameLabel.TextColor3 =
+		GUNDROP_COLOR
+
+	NameLabel.TextStrokeColor3 =
+		Color3.fromRGB(
+			0,
+			0,
+			0
+		)
+
+	NameLabel.TextStrokeTransparency =
+		0
+
+	NameLabel.TextSize =
+		17
+
+	NameLabel.Font =
+		Enum.Font.GothamBold
+
+	NameLabel.Parent =
+		Billboard
+
+	local DistanceLabel =
+		Instance.new(
+			"TextLabel"
+		)
+
+	DistanceLabel.Name =
+		"DropDistanceLabel"
+
+	DistanceLabel.Size =
+		UDim2.new(
+			1,
+			0,
+			0,
+			25
+		)
+
+	DistanceLabel.Position =
+		UDim2.new(
+			0,
+			0,
+			0,
+			28
+		)
+
+	DistanceLabel.BackgroundTransparency =
+		1
+
+	DistanceLabel.Text =
+		"[ ? studs ]"
+
+	DistanceLabel.TextColor3 =
+		GUNDROP_COLOR
+
+	DistanceLabel.TextStrokeColor3 =
+		Color3.fromRGB(
+			0,
+			0,
+			0
+		)
+
+	DistanceLabel.TextStrokeTransparency =
+		0
+
+	DistanceLabel.TextSize =
+		14
+
+	DistanceLabel.Font =
+		Enum.Font.GothamBold
+
+	DistanceLabel.Parent =
+		Billboard
+
+	GunDropBillboard =
+		Billboard
+
+	return Billboard
+
+end
+
+
+local function updateGunDropESP()
+
+	if not gunDropESPEnabled then
+
+		removeGunDropESP()
+		return
+
+	end
+
+	local gunDrop =
+		findGunDrop()
+
+	-- Quando não existir mais GunDrop, o ESP some sozinho.
+	if not gunDrop
+		or not gunDrop.Parent
+	then
+
+		removeGunDropESP()
+		return
+
+	end
+
+	local adornee =
+		getGunDropAdornee(
+			gunDrop
+		)
+
+	if not adornee
+		or not adornee.Parent
+	then
+
+		removeGunDropESP()
+		return
+
+	end
+
+	-- Se apareceu outra GunDrop ou o ESP ainda não existe, recria.
+	if CurrentGunDrop ~= gunDrop
+		or not GunDropBillboard
+		or not GunDropBillboard.Parent
+	then
+
+		createGunDropESP(
+			gunDrop
+		)
+
+	end
+
+	if not GunDropBillboard then
+		return
+	end
+
+	gunDropFound =
+		true
+
+	local DistanceLabel =
+		GunDropBillboard:FindFirstChild(
+			"DropDistanceLabel"
+		)
+
+	local localCharacter =
+		LocalPlayer.Character
+
+	local localRoot =
+		localCharacter
+		and localCharacter:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if DistanceLabel
+		and localRoot
+	then
+
+		local distance =
+			(
+				localRoot.Position
+				-
+				adornee.Position
+			).Magnitude
+
+		distance =
+			math.floor(
+				distance + 0.5
+			)
+
+		DistanceLabel.Text =
+			"[ "
+			..
+			tostring(distance)
+			..
+			" studs ]"
+
+	elseif DistanceLabel then
+
+		DistanceLabel.Text =
+			"[ ? studs ]"
+
+	end
+
+end
+
+--========================================================--
 -- GUI
 --========================================================--
 
@@ -720,7 +1071,7 @@ local NORMAL_SIZE =
 		0,
 		370,
 		0,
-		760
+		840
 	)
 
 local MINIMIZED_SIZE =
@@ -1322,27 +1673,51 @@ local ToggleESPDistance =
 	)
 
 --========================================================--
+-- ESP GUNDROP
+--========================================================--
+
+local GunDropStatus =
+	newLabel(
+		"GunDrop ESP: DESATIVADO",
+		395
+	)
+
+
+local ToggleGunDropESP =
+	newButton(
+		"ATIVAR ESP GUN DROP",
+		425
+	)
+
+ToggleGunDropESP.BackgroundColor3 =
+	Color3.fromRGB(
+		210,
+		120,
+		20
+	)
+
+--========================================================--
 -- AIMLOCK
 --========================================================--
 
 local AimStatus =
 	newLabel(
 		"AimLock: DESATIVADO",
-		395
+		475
 	)
 
 
 local ToggleAim =
 	newButton(
 		"ATIVAR AIMLOCK",
-		425
+		505
 	)
 
 
 local TargetButton =
 	newButton(
 		"Alvo: NENHUM",
-		475
+		555
 	)
 
 
@@ -1353,7 +1728,7 @@ local AimDistanceLabel =
 		AIM_MAX_DISTANCE
 		..
 		" studs",
-		525
+		605
 	)
 
 
@@ -1361,7 +1736,7 @@ local AimDistanceMinus =
 	newSmallButton(
 		"-",
 		120,
-		555
+		635
 	)
 
 
@@ -1369,7 +1744,7 @@ local AimDistancePlus =
 	newSmallButton(
 		"+",
 		195,
-		555
+		635
 	)
 
 --========================================================--
@@ -1394,7 +1769,7 @@ PlayerList.Position =
 		0.09,
 		0,
 		0,
-		515
+		595
 	)
 
 PlayerList.BackgroundColor3 =
@@ -1485,7 +1860,7 @@ PlayerListPadding.Parent =
 local AimInfo =
 	newLabel(
 		"Segure botão direito para travar no alvo",
-		610
+		690
 	)
 
 AimInfo.TextColor3 =
@@ -1674,6 +2049,72 @@ local function updateInterface()
 				45,
 				100,
 				190
+			)
+
+	end
+
+	--------------------------------------------------
+	-- ESP GUNDROP
+	--------------------------------------------------
+
+	if gunDropESPEnabled then
+
+		if gunDropFound then
+
+			GunDropStatus.Text =
+				"GunDrop ESP: ARMA ENCONTRADA"
+
+			GunDropStatus.TextColor3 =
+				Color3.fromRGB(
+					255,
+					160,
+					30
+				)
+
+		else
+
+			GunDropStatus.Text =
+				"GunDrop ESP: PROCURANDO..."
+
+			GunDropStatus.TextColor3 =
+				Color3.fromRGB(
+					255,
+					190,
+					80
+				)
+
+		end
+
+		ToggleGunDropESP.Text =
+			"DESATIVAR ESP GUN DROP"
+
+		ToggleGunDropESP.BackgroundColor3 =
+			Color3.fromRGB(
+				190,
+				55,
+				55
+			)
+
+	else
+
+		GunDropStatus.Text =
+			"GunDrop ESP: DESATIVADO"
+
+		GunDropStatus.TextColor3 =
+			Color3.fromRGB(
+				255,
+				80,
+				80
+			)
+
+		ToggleGunDropESP.Text =
+			"ATIVAR ESP GUN DROP"
+
+		ToggleGunDropESP.BackgroundColor3 =
+			Color3.fromRGB(
+				210,
+				120,
+				20
 			)
 
 	end
@@ -2031,6 +2472,31 @@ trackConnection(
 				then
 
 					removeAllESP()
+
+				end
+
+				updateInterface()
+
+			end
+		)
+)
+
+trackConnection(
+	ToggleGunDropESP
+		.MouseButton1Click:
+		Connect(
+			function()
+
+				gunDropESPEnabled =
+					not gunDropESPEnabled
+
+				if gunDropESPEnabled then
+
+					updateGunDropESP()
+
+				else
+
+					removeGunDropESP()
 
 				end
 
@@ -2425,6 +2891,13 @@ trackConnection(
 
 				espTimer = 0
 
+				if gunDropESPEnabled then
+
+					updateGunDropESP()
+					updateInterface()
+
+				end
+
 				if not espNameEnabled
 					and not espDistanceEnabled
 				then
@@ -2670,6 +3143,9 @@ local function cleanup()
 	espDistanceEnabled =
 		false
 
+	gunDropESPEnabled =
+		false
+
 	aimlockEnabled =
 		false
 
@@ -2693,6 +3169,8 @@ local function cleanup()
 	restoreAllHitboxes()
 
 	removeAllESP()
+
+	removeGunDropESP()
 
 	for _, connection
 		in ipairs(
