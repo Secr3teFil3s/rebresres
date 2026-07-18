@@ -1,6 +1,6 @@
 --========================================================--
 -- B1tSampl3 HUB
--- Modern UI + HitBox + Player ESP + GunDrop ESP + AimLock
+-- Modern UI + HitBox + Player ESP + GunDrop ESP + AimLock + Troll Fling
 -- Desenvolvido pelo Studio B1tSampl3
 --========================================================--
 
@@ -80,6 +80,14 @@ local gunDropESPEnabled = false
 local aimlockEnabled = false
 local rightMouseHeld = false
 local selectedTarget = nil
+
+local flingActive = false
+local selectedFlingTarget = nil
+local flingGeneration = 0
+local flingBodyVelocity = nil
+local flingReturnCFrame = nil
+local ORIGINAL_FALLEN_PARTS_DESTROY_HEIGHT = workspace.FallenPartsDestroyHeight
+
 local waitingAimKeybind = false
 local waitingHubKeybind = false
 local currentTab = "ESP"
@@ -87,6 +95,7 @@ local currentTab = "ESP"
 local OriginalProperties = {}
 local Connections = {}
 local GunDropEntries = {}
+local updateInterface
 
 --========================================================--
 -- CONEXÕES
@@ -637,6 +646,254 @@ local function updateGunDropDistances()
 end
 
 --========================================================--
+-- TROLL / FLING - ALVO ÚNICO E CONTÍNUO
+--========================================================--
+
+local function getLocalFlingParts()
+	local character = LocalPlayer.Character
+	if not character then
+		return nil, nil, nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+		or (humanoid and humanoid.RootPart)
+
+	return character, humanoid, rootPart
+end
+
+local function getTargetFlingPart(targetPlayer)
+	if not targetPlayer or not targetPlayer.Parent then
+		return nil, nil, nil
+	end
+
+	local character = targetPlayer.Character
+	if not character then
+		return nil, nil, nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+		or (humanoid and humanoid.RootPart)
+	local head = character:FindFirstChild("Head")
+
+	local targetPart = rootPart or head
+
+	if not targetPart then
+		local accessory = character:FindFirstChildOfClass("Accessory")
+		local handle = accessory and accessory:FindFirstChild("Handle")
+		if handle and handle:IsA("BasePart") then
+			targetPart = handle
+		end
+	end
+
+	return humanoid, targetPart, character
+end
+
+local function destroyFlingBodyVelocity()
+	if flingBodyVelocity then
+		pcall(function()
+			flingBodyVelocity:Destroy()
+		end)
+		flingBodyVelocity = nil
+	end
+end
+
+local function restoreFlingState(returnToSavedPosition)
+	destroyFlingBodyVelocity()
+
+	pcall(function()
+		workspace.FallenPartsDestroyHeight = ORIGINAL_FALLEN_PARTS_DESTROY_HEIGHT
+	end)
+
+	local character, humanoid, rootPart = getLocalFlingParts()
+
+	if humanoid then
+		pcall(function()
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+		end)
+	end
+
+	if returnToSavedPosition and character and rootPart and flingReturnCFrame then
+		pcall(function()
+			character:PivotTo(flingReturnCFrame * CFrame.new(0, 0.5, 0))
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+		end)
+	end
+
+	Camera = workspace.CurrentCamera
+	if Camera and humanoid then
+		pcall(function()
+			Camera.CameraSubject = humanoid
+		end)
+	end
+
+	flingReturnCFrame = nil
+end
+
+local function stopFling(returnToSavedPosition)
+	flingActive = false
+	flingGeneration = flingGeneration + 1
+	restoreFlingState(returnToSavedPosition ~= false)
+
+	if updateInterface then
+		updateInterface()
+	end
+end
+
+local function flingTargetOnce(targetPlayer, generation)
+	local character, humanoid, rootPart = getLocalFlingParts()
+	local targetHumanoid, targetPart = getTargetFlingPart(targetPlayer)
+
+	if not character or not humanoid or not rootPart or not targetPart then
+		return false
+	end
+
+	if targetHumanoid and targetHumanoid.Health <= 0 then
+		return false
+	end
+
+	if targetHumanoid and targetHumanoid.Sit then
+		return false
+	end
+
+	if not flingReturnCFrame then
+		flingReturnCFrame = rootPart.CFrame
+	end
+
+	pcall(function()
+		workspace.FallenPartsDestroyHeight = -50000
+	end)
+
+	pcall(function()
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+	end)
+
+	destroyFlingBodyVelocity()
+
+	local bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.Name = "B1tSampl3_FlingVelocity"
+	bodyVelocity.Velocity = Vector3.zero
+	bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+	bodyVelocity.Parent = rootPart
+	flingBodyVelocity = bodyVelocity
+
+	local startedAt = os.clock()
+	local angle = 0
+	local direction = 1
+
+	while flingActive
+		and not destroyed
+		and generation == flingGeneration
+		and targetPlayer == selectedFlingTarget
+		and targetPlayer.Parent
+		and os.clock() - startedAt < 1.75
+	do
+		local currentTargetHumanoid, currentTargetPart = getTargetFlingPart(targetPlayer)
+		if not currentTargetPart then
+			break
+		end
+
+		if currentTargetHumanoid and currentTargetHumanoid.Health <= 0 then
+			break
+		end
+
+		angle = angle + 125
+		direction = -direction
+
+		local targetVelocity = currentTargetPart.AssemblyLinearVelocity.Magnitude
+		local moveDirection = currentTargetHumanoid and currentTargetHumanoid.MoveDirection or Vector3.zero
+
+		local verticalOffset = 1.5 * direction
+		local forwardOffset = 0
+
+		if targetVelocity >= 50 and currentTargetHumanoid then
+			forwardOffset = currentTargetHumanoid.WalkSpeed * direction
+		end
+
+		local desiredCFrame =
+			CFrame.new(currentTargetPart.Position)
+			* CFrame.new(
+				moveDirection.X * math.min(targetVelocity, 40) / 1.25,
+				verticalOffset,
+				forwardOffset + moveDirection.Z * math.min(targetVelocity, 40) / 1.25
+			)
+			* CFrame.Angles(math.rad(angle), 0, 0)
+
+		pcall(function()
+			character:PivotTo(desiredCFrame)
+			rootPart.AssemblyLinearVelocity = Vector3.new(9e7, 9e8, 9e7)
+			rootPart.AssemblyAngularVelocity = Vector3.new(9e8, 9e8, 9e8)
+		end)
+
+		RunService.Heartbeat:Wait()
+	end
+
+	destroyFlingBodyVelocity()
+
+	if flingActive
+		and generation == flingGeneration
+		and targetPlayer == selectedFlingTarget
+	then
+		restoreFlingState(true)
+	end
+
+	return true
+end
+
+local function startFling()
+	if flingActive then
+		return
+	end
+
+	if not selectedFlingTarget or not selectedFlingTarget.Parent then
+		selectedFlingTarget = nil
+		if updateInterface then
+			updateInterface()
+		end
+		return
+	end
+
+	flingActive = true
+	flingGeneration = flingGeneration + 1
+	local generation = flingGeneration
+
+	if updateInterface then
+		updateInterface()
+	end
+
+	task.spawn(function()
+		while flingActive
+			and not destroyed
+			and generation == flingGeneration
+		do
+			local target = selectedFlingTarget
+
+			if not target or not target.Parent then
+				break
+			end
+
+			local success, didFling = pcall(function()
+				return flingTargetOnce(target, generation)
+			end)
+
+			if not success or not didFling then
+				break
+			end
+
+			if flingActive and generation == flingGeneration then
+				task.wait(0.15)
+			end
+		end
+
+		if flingActive and generation == flingGeneration then
+			stopFling(true)
+		end
+	end)
+end
+
+--========================================================--
 -- GUI BASE
 --========================================================--
 
@@ -994,14 +1251,16 @@ end
 local HitBoxPage = createPage("HitBox", "HitBox", "Ajuste o tamanho e a transparência da hitbox dos outros jogadores.")
 local ESPPage = createPage("ESP", "ESP", "Visualização de jogadores, armas e GunDrop com atualização otimizada.")
 local AimPage = createPage("AimLock", "AimLock", "Selecione um alvo, configure a distância e use uma tecla de atalho.")
+local TrollPage = createPage("Troll", "Troll", "Selecione um jogador e controle a função Fling diretamente pelo HUB.")
 local SettingsPage = createPage("Settings", "Configurações", "Personalize o HUB, o atalho de visibilidade e as opções gerais.")
 local CreditsPage = createPage("Credits", "Créditos", "Informações sobre o desenvolvimento do B1tSampl3 HUB.")
 
 createTab("HitBox", "HitBox", 1)
 createTab("ESP", "ESP", 2)
 createTab("AimLock", "AimLock", 3)
-createTab("Settings", "Configurações", 4)
-createTab("Credits", "Créditos", 5)
+createTab("Troll", "Troll", 4)
+createTab("Settings", "Configurações", 5)
+createTab("Credits", "Créditos", 6)
 
 local function showTab(name)
 	currentTab = name
@@ -1122,6 +1381,45 @@ local AimKeyLabel = createStatusPill(AimKeyCard, "TECLA: " .. AIM_TOGGLE_KEY.Nam
 local AimKeyButton = createActionButton(AimKeyCard, "DEFINIR TECLA", 170, 1, -184, 80, true, false)
 
 --========================================================--
+-- TROLL PAGE
+--========================================================--
+
+local FlingMainCard = createCard(TrollPage, "Fling", "Executa o Fling continuamente contra o jogador selecionado até você desativar a função.", 128, 1)
+local FlingStatus = createStatusPill(FlingMainCard, "DESATIVADO", 14, 84, 135)
+local ToggleFling = createActionButton(FlingMainCard, "ATIVAR FLING", 170, 1, -184, 80, true, false)
+
+local FlingTargetCard = createCard(TrollPage, "Selecionar alvo", "Escolha um único jogador como alvo do Fling. A lista é atualizada sempre que for aberta.", 214, 2)
+local FlingTargetButton = createActionButton(FlingTargetCard, "Alvo: NENHUM", 260, 0, 14, 72, false, false)
+
+local FlingPlayerList = Instance.new("ScrollingFrame")
+FlingPlayerList.Size = UDim2.new(1, -28, 0, 92)
+FlingPlayerList.Position = UDim2.new(0, 14, 0, 112)
+FlingPlayerList.BackgroundColor3 = Theme.Surface2
+FlingPlayerList.BorderSizePixel = 0
+FlingPlayerList.ScrollBarThickness = 4
+FlingPlayerList.ScrollBarImageColor3 = Theme.Accent
+FlingPlayerList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+FlingPlayerList.CanvasSize = UDim2.new(0, 0, 0, 0)
+FlingPlayerList.Visible = false
+FlingPlayerList.Parent = FlingTargetCard
+addCorner(FlingPlayerList, 9)
+addStroke(FlingPlayerList, Theme.Border, 1, 0.4)
+
+local FlingPlayerListLayout = Instance.new("UIListLayout")
+FlingPlayerListLayout.Padding = UDim.new(0, 5)
+FlingPlayerListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+FlingPlayerListLayout.Parent = FlingPlayerList
+
+local FlingPlayerListPadding = Instance.new("UIPadding")
+FlingPlayerListPadding.PaddingTop = UDim.new(0, 6)
+FlingPlayerListPadding.PaddingBottom = UDim.new(0, 6)
+FlingPlayerListPadding.PaddingLeft = UDim.new(0, 6)
+FlingPlayerListPadding.PaddingRight = UDim.new(0, 6)
+FlingPlayerListPadding.Parent = FlingPlayerList
+
+local FlingInfoCard = createCard(TrollPage, "Como usar", "1. Selecione o jogador alvo.  2. Clique em ATIVAR FLING.  3. Use DESATIVAR FLING para interromper e restaurar seu personagem.", 108, 3)
+
+--========================================================--
 -- SETTINGS PAGE
 --========================================================--
 
@@ -1188,7 +1486,7 @@ CreditsFooter.Parent = CreditsCard
 -- ATUALIZAR INTERFACE
 --========================================================--
 
-local function updateInterface()
+updateInterface = function()
 	SizeValue.Text = tostring(HITBOX_SIZE)
 	TransparencyValue.Text = string.format("%.1f", HITBOX_TRANSPARENCY)
 	AimDistanceValue.Text = tostring(AIM_MAX_DISTANCE) .. " studs"
@@ -1242,6 +1540,23 @@ local function updateInterface()
 		TargetButton.Text = "Alvo: NENHUM"
 	end
 
+	if flingActive then
+		FlingStatus.Text = "ATIVADO"
+		FlingStatus.TextColor3 = Theme.Danger
+		ToggleFling.Text = "DESATIVAR FLING"
+	else
+		FlingStatus.Text = selectedFlingTarget and "PRONTO" or "DESATIVADO"
+		FlingStatus.TextColor3 = selectedFlingTarget and Theme.Warning or Theme.Muted
+		ToggleFling.Text = "ATIVAR FLING"
+	end
+
+	if selectedFlingTarget and selectedFlingTarget.Parent then
+		FlingTargetButton.Text = "Alvo: " .. selectedFlingTarget.DisplayName
+	else
+		selectedFlingTarget = nil
+		FlingTargetButton.Text = "Alvo: NENHUM"
+	end
+
 	if waitingAimKeybind then
 		AimKeyLabel.Text = "PRESSIONE UMA TECLA..."
 		AimKeyLabel.TextColor3 = Theme.Warning
@@ -1292,6 +1607,41 @@ local function refreshPlayerList()
 			trackConnection(playerButton.MouseButton1Click:Connect(function()
 				selectedTarget = targetPlayer
 				PlayerList.Visible = false
+				updateInterface()
+			end))
+		end
+	end
+end
+
+local function refreshFlingPlayerList()
+	for _, object in ipairs(FlingPlayerList:GetChildren()) do
+		if object:IsA("TextButton") then
+			object:Destroy()
+		end
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			local playerButton = Instance.new("TextButton")
+			playerButton.Size = UDim2.new(1, -4, 0, 32)
+			playerButton.BackgroundColor3 = Theme.Surface3
+			playerButton.BorderSizePixel = 0
+			playerButton.Text = player.DisplayName .. " [@" .. player.Name .. "]"
+			playerButton.TextColor3 = Theme.Text
+			playerButton.TextSize = 11
+			playerButton.Font = Enum.Font.Gotham
+			playerButton.AutoButtonColor = false
+			playerButton.Parent = FlingPlayerList
+			addCorner(playerButton, 7)
+
+			local targetPlayer = player
+			trackConnection(playerButton.MouseButton1Click:Connect(function()
+				if flingActive then
+					stopFling(true)
+				end
+
+				selectedFlingTarget = targetPlayer
+				FlingPlayerList.Visible = false
 				updateInterface()
 			end))
 		end
@@ -1397,6 +1747,25 @@ trackConnection(AimKeyButton.MouseButton1Click:Connect(function()
 	waitingHubKeybind = false
 	waitingAimKeybind = not waitingAimKeybind
 	updateInterface()
+end))
+
+--========================================================--
+-- CONTROLES TROLL / FLING
+--========================================================--
+
+trackConnection(ToggleFling.MouseButton1Click:Connect(function()
+	if flingActive then
+		stopFling(true)
+	else
+		startFling()
+	end
+
+	updateInterface()
+end))
+
+trackConnection(FlingTargetButton.MouseButton1Click:Connect(function()
+	refreshFlingPlayerList()
+	FlingPlayerList.Visible = not FlingPlayerList.Visible
 end))
 
 --========================================================--
@@ -1676,6 +2045,10 @@ trackConnection(Players.PlayerAdded:Connect(function()
 	if PlayerList.Visible then
 		task.defer(refreshPlayerList)
 	end
+
+	if FlingPlayerList.Visible then
+		task.defer(refreshFlingPlayerList)
+	end
 end))
 
 trackConnection(Players.PlayerRemoving:Connect(function(player)
@@ -1688,8 +2061,18 @@ trackConnection(Players.PlayerRemoving:Connect(function(player)
 		updateInterface()
 	end
 
+	if selectedFlingTarget == player then
+		stopFling(true)
+		selectedFlingTarget = nil
+		updateInterface()
+	end
+
 	if PlayerList.Visible then
 		task.defer(refreshPlayerList)
+	end
+
+	if FlingPlayerList.Visible then
+		task.defer(refreshFlingPlayerList)
 	end
 end))
 
@@ -1702,12 +2085,16 @@ local function cleanup()
 		return
 	end
 
+	stopFling(true)
+
 	destroyed = true
 	hitboxEnabled = false
 	espNameEnabled = false
 	espDistanceEnabled = false
 	gunDropESPEnabled = false
 	aimlockEnabled = false
+	flingActive = false
+	selectedFlingTarget = nil
 	rightMouseHeld = false
 	waitingAimKeybind = false
 	waitingHubKeybind = false
