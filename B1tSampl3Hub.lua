@@ -1,11 +1,13 @@
 --========================================================--
 -- B1tSampl3 HUB
--- HitBox + ESP Name + ESP Distance + GunDrop ESP + AimLock
+-- Modern UI + HitBox + Player ESP + GunDrop ESP + AimLock
+-- Desenvolvido pelo Studio B1tSampl3
 --========================================================--
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -25,49 +27,66 @@ end
 
 local HITBOX_SIZE = 11
 local HITBOX_TRANSPARENCY = 0.8
-
-local MIN_SIZE = 2
-local MAX_SIZE = 50
-local SIZE_STEP = 1
-
-local MIN_TRANSPARENCY = 0
-local MAX_TRANSPARENCY = 1
-local TRANSPARENCY_STEP = 0.1
+local HITBOX_MIN_SIZE = 2
+local HITBOX_MAX_SIZE = 50
+local HITBOX_SIZE_STEP = 1
+local HITBOX_TRANSPARENCY_STEP = 0.1
 
 local AIM_MAX_DISTANCE = 150
 local AIM_MIN_DISTANCE = 25
 local AIM_MAX_LIMIT = 1000
 local AIM_DISTANCE_STEP = 25
 
--- Tecla padrão para ativar/desativar o AimLock.
--- Pode ser alterada pelo próprio painel.
 local AIM_TOGGLE_KEY = Enum.KeyCode.Q
+local HUB_TOGGLE_KEY = Enum.KeyCode.K
+
+local PLAYER_ESP_UPDATE_INTERVAL = 0.15
+local HITBOX_UPDATE_INTERVAL = 0.15
+local GUNDROP_DISTANCE_UPDATE_INTERVAL = 0.15
+
+local GUNDROP_COLOR = Color3.fromRGB(255, 154, 55)
+local GUN_COLOR = Color3.fromRGB(70, 155, 255)
+local KNIFE_COLOR = Color3.fromRGB(255, 78, 78)
+local SAFE_COLOR = Color3.fromRGB(79, 230, 130)
+
+--========================================================--
+-- TEMA
+--========================================================--
+
+local Theme = {
+	Background = Color3.fromRGB(14, 16, 22),
+	Surface = Color3.fromRGB(21, 24, 33),
+	Surface2 = Color3.fromRGB(27, 31, 42),
+	Surface3 = Color3.fromRGB(34, 39, 52),
+	Border = Color3.fromRGB(58, 66, 88),
+	Text = Color3.fromRGB(238, 241, 248),
+	Muted = Color3.fromRGB(151, 160, 180),
+	Accent = Color3.fromRGB(94, 118, 255),
+	Accent2 = Color3.fromRGB(126, 82, 230),
+	Success = Color3.fromRGB(73, 213, 127),
+	Danger = Color3.fromRGB(230, 76, 88),
+	Warning = Color3.fromRGB(245, 166, 68),
+}
 
 --========================================================--
 -- ESTADOS
 --========================================================--
 
+local destroyed = false
 local hitboxEnabled = false
-
 local espNameEnabled = false
 local espDistanceEnabled = false
 local gunDropESPEnabled = false
-local gunDropFound = false
-
 local aimlockEnabled = false
 local rightMouseHeld = false
 local selectedTarget = nil
 local waitingAimKeybind = false
-
-local minimized = false
-local destroyed = false
+local waitingHubKeybind = false
+local currentTab = "ESP"
 
 local OriginalProperties = {}
-
 local Connections = {}
-
-local CurrentGunDrop = nil
-local GunDropBillboard = nil
+local GunDropEntries = {}
 
 --========================================================--
 -- CONEXÕES
@@ -79,11 +98,56 @@ local function trackConnection(connection)
 end
 
 --========================================================--
+-- UTILITÁRIOS
+--========================================================--
+
+local function addCorner(object, radius)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, radius or 10)
+	corner.Parent = object
+	return corner
+end
+
+local function addStroke(object, color, thickness, transparency)
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = color or Theme.Border
+	stroke.Thickness = thickness or 1
+	stroke.Transparency = transparency or 0
+	stroke.Parent = object
+	return stroke
+end
+
+local function addGradient(object, color1, color2, rotation)
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, color1),
+		ColorSequenceKeypoint.new(1, color2),
+	})
+	gradient.Rotation = rotation or 0
+	gradient.Parent = object
+	return gradient
+end
+
+local function tween(object, duration, properties)
+	local info = TweenInfo.new(duration or 0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local animation = TweenService:Create(object, info, properties)
+	animation:Play()
+	return animation
+end
+
+local function countGunDrops()
+	local count = 0
+	for _ in pairs(GunDropEntries) do
+		count = count + 1
+	end
+	return count
+end
+
+--========================================================--
 -- HITBOX
 --========================================================--
 
 local function saveOriginalProperties(rootPart)
-
 	if OriginalProperties[rootPart] then
 		return
 	end
@@ -93,2320 +157,1110 @@ local function saveOriginalProperties(rootPart)
 		Transparency = rootPart.Transparency,
 		BrickColor = rootPart.BrickColor,
 		Material = rootPart.Material,
-		CanCollide = rootPart.CanCollide
+		CanCollide = rootPart.CanCollide,
 	}
-
 end
 
-
 local function applyHitbox(player)
-
 	if player == LocalPlayer then
 		return
 	end
 
 	local character = player.Character
-
 	if not character then
 		return
 	end
 
-	local rootPart =
-		character:FindFirstChild(
-			"HumanoidRootPart"
-		)
-
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
 	if not rootPart then
 		return
 	end
 
 	saveOriginalProperties(rootPart)
 
-	rootPart.Size =
-		Vector3.new(
-			HITBOX_SIZE,
-			HITBOX_SIZE,
-			HITBOX_SIZE
-		)
-
-	rootPart.Transparency =
-		HITBOX_TRANSPARENCY
-
-	rootPart.BrickColor =
-		BrickColor.new(
-			"Really blue"
-		)
-
-	rootPart.Material =
-		Enum.Material.Neon
-
-	rootPart.CanCollide =
-		false
-
+	rootPart.Size = Vector3.new(HITBOX_SIZE, HITBOX_SIZE, HITBOX_SIZE)
+	rootPart.Transparency = HITBOX_TRANSPARENCY
+	rootPart.BrickColor = BrickColor.new("Really blue")
+	rootPart.Material = Enum.Material.Neon
+	rootPart.CanCollide = false
 end
-
 
 local function restoreAllHitboxes()
-
-	local restoreList = {}
-
-	for rootPart in pairs(
-		OriginalProperties
-	) do
-
-		table.insert(
-			restoreList,
-			rootPart
-		)
-
-	end
-
-	for _, rootPart in ipairs(
-		restoreList
-	) do
-
-		local original =
-			OriginalProperties[rootPart]
-
-		if original
-			and rootPart
-			and rootPart.Parent
-		then
-
-			pcall(
-				function()
-
-					rootPart.Size =
-						original.Size
-
-					rootPart.Transparency =
-						original.Transparency
-
-					rootPart.BrickColor =
-						original.BrickColor
-
-					rootPart.Material =
-						original.Material
-
-					rootPart.CanCollide =
-						original.CanCollide
-
-				end
-			)
-
+	for rootPart, original in pairs(OriginalProperties) do
+		if rootPart and rootPart.Parent and original then
+			pcall(function()
+				rootPart.Size = original.Size
+				rootPart.Transparency = original.Transparency
+				rootPart.BrickColor = original.BrickColor
+				rootPart.Material = original.Material
+				rootPart.CanCollide = original.CanCollide
+			end)
 		end
-
-		OriginalProperties[rootPart] =
-			nil
-
+		OriginalProperties[rootPart] = nil
 	end
-
 end
 
 --========================================================--
--- ESP
+-- ESP DE JOGADORES
 --========================================================--
 
--- Detecta Gun/Knife exatamente onde o jogo coloca as Tools:
--- 1) Guardada: Player.Backpack.Gun / Player.Backpack.Knife
--- 2) Equipada: Workspace.NomeDoPlayer.Gun / Workspace.NomeDoPlayer.Knife
--- Knife tem prioridade (vermelho), depois Gun (azul), sem arma fica verde.
 local function getPlayerWeaponColor(player)
+	local backpack = player:FindFirstChild("Backpack")
+	local character = player.Character or workspace:FindFirstChild(player.Name)
 
-	-- Backpack fica dentro do objeto Player.
-	local backpack =
-		player:FindFirstChild("Backpack")
-
-	-- Quando equipada, a Tool vira filha direta do Character/Model na Workspace.
-	local character =
-		workspace:FindFirstChild(
-			player.Name
-		)
-		or player.Character
-
-	local hasGun = false
 	local hasKnife = false
-
-	--------------------------------------------------
-	-- PROCURAR NO BACKPACK (GUARDADA)
-	--------------------------------------------------
+	local hasGun = false
 
 	if backpack then
-
-		if backpack:FindFirstChild("Knife") then
-			hasKnife = true
-		end
-
-		if backpack:FindFirstChild("Gun") then
-			hasGun = true
-		end
-
+		hasKnife = backpack:FindFirstChild("Knife") ~= nil
+		hasGun = backpack:FindFirstChild("Gun") ~= nil
 	end
-
-	--------------------------------------------------
-	-- PROCURAR NO MODEL DA WORKSPACE (EQUIPADA)
-	--------------------------------------------------
 
 	if character then
-
-		if character:FindFirstChild("Knife") then
-			hasKnife = true
-		end
-
-		if character:FindFirstChild("Gun") then
-			hasGun = true
-		end
-
+		hasKnife = hasKnife or character:FindFirstChild("Knife") ~= nil
+		hasGun = hasGun or character:FindFirstChild("Gun") ~= nil
 	end
 
-	--------------------------------------------------
-	-- CORES DO ESP
-	--------------------------------------------------
-
-	-- Knife = vermelho
 	if hasKnife then
-
-		return Color3.fromRGB(
-			255,
-			50,
-			50
-		)
-
+		return KNIFE_COLOR
 	end
 
-	-- Gun = azul
 	if hasGun then
-
-		return Color3.fromRGB(
-			0,
-			140,
-			255
-		)
-
+		return GUN_COLOR
 	end
 
-	-- Sem arma = verde
-	return Color3.fromRGB(
-		0,
-		255,
-		100
-	)
-
+	return SAFE_COLOR
 end
 
-local function getESP(player)
-
-	local character =
-		player.Character
-
+local function getPlayerESP(player)
+	local character = player.Character
 	if not character then
 		return nil
 	end
 
-	local head =
-		character:FindFirstChild(
-			"Head"
-		)
-
+	local head = character:FindFirstChild("Head")
 	if not head then
 		return nil
 	end
 
-	return head:FindFirstChild(
-		"B1tSampl3_ESP"
-	)
-
+	return head:FindFirstChild("B1tSampl3_ESP")
 end
 
-
-local function createESP(player)
-
+local function createPlayerESP(player)
 	if player == LocalPlayer then
 		return nil
 	end
 
-	local character =
-		player.Character
-
+	local character = player.Character
 	if not character then
 		return nil
 	end
 
-	local head =
-		character:FindFirstChild(
-			"Head"
-		)
-
+	local head = character:FindFirstChild("Head")
 	if not head then
 		return nil
 	end
 
-	local existing =
-		head:FindFirstChild(
-			"B1tSampl3_ESP"
-		)
-
+	local existing = head:FindFirstChild("B1tSampl3_ESP")
 	if existing then
 		return existing
 	end
 
-	--------------------------------------------------
-	-- BILLBOARD
-	--------------------------------------------------
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "B1tSampl3_ESP"
+	billboard.Adornee = head
+	billboard.Size = UDim2.new(0, 240, 0, 62)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 5000
+	billboard.Parent = head
 
-	local Billboard =
-		Instance.new(
-			"BillboardGui"
-		)
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "NameLabel"
+	nameLabel.Size = UDim2.new(1, 0, 0, 30)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = player.DisplayName .. " [@" .. player.Name .. "]"
+	nameLabel.TextColor3 = getPlayerWeaponColor(player)
+	nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	nameLabel.TextStrokeTransparency = 0
+	nameLabel.TextSize = 16
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.Visible = espNameEnabled
+	nameLabel.Parent = billboard
 
-	Billboard.Name =
-		"B1tSampl3_ESP"
+	local distanceLabel = Instance.new("TextLabel")
+	distanceLabel.Name = "DistanceLabel"
+	distanceLabel.Size = UDim2.new(1, 0, 0, 25)
+	distanceLabel.Position = UDim2.new(0, 0, 0, 28)
+	distanceLabel.BackgroundTransparency = 1
+	distanceLabel.Text = "[ ? studs ]"
+	distanceLabel.TextColor3 = Color3.fromRGB(235, 238, 245)
+	distanceLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	distanceLabel.TextStrokeTransparency = 0
+	distanceLabel.TextSize = 14
+	distanceLabel.Font = Enum.Font.GothamBold
+	distanceLabel.Visible = espDistanceEnabled
+	distanceLabel.Parent = billboard
 
-	Billboard.Adornee =
-		head
-
-	Billboard.Size =
-		UDim2.new(
-			0,
-			240,
-			0,
-			65
-		)
-
-	Billboard.StudsOffset =
-		Vector3.new(
-			0,
-			3,
-			0
-		)
-
-	Billboard.AlwaysOnTop =
-		true
-
-	Billboard.MaxDistance =
-		5000
-
-	Billboard.Parent =
-		head
-
-	--------------------------------------------------
-	-- NOME
-	--------------------------------------------------
-
-	local NameLabel =
-		Instance.new(
-			"TextLabel"
-		)
-
-	NameLabel.Name =
-		"NameLabel"
-
-	NameLabel.Size =
-		UDim2.new(
-			1,
-			0,
-			0,
-			30
-		)
-
-	NameLabel.Position =
-		UDim2.new(
-			0,
-			0,
-			0,
-			0
-		)
-
-	NameLabel.BackgroundTransparency =
-		1
-
-	NameLabel.Text =
-		player.DisplayName
-		..
-		" [@"
-		..
-		player.Name
-		..
-		"]"
-
-	NameLabel.TextColor3 =
-		getPlayerWeaponColor(
-			player
-		)
-
-	NameLabel.TextStrokeColor3 =
-		Color3.fromRGB(
-			0,
-			0,
-			0
-		)
-
-	NameLabel.TextStrokeTransparency =
-		0
-
-	NameLabel.TextSize =
-		16
-
-	NameLabel.Font =
-		Enum.Font.GothamBold
-
-	NameLabel.Visible =
-		espNameEnabled
-
-	NameLabel.Parent =
-		Billboard
-
-	--------------------------------------------------
-	-- DISTÂNCIA
-	--------------------------------------------------
-
-	local DistanceLabel =
-		Instance.new(
-			"TextLabel"
-		)
-
-	DistanceLabel.Name =
-		"DistanceLabel"
-
-	DistanceLabel.Size =
-		UDim2.new(
-			1,
-			0,
-			0,
-			25
-		)
-
-	DistanceLabel.Position =
-		UDim2.new(
-			0,
-			0,
-			0,
-			28
-		)
-
-	DistanceLabel.BackgroundTransparency =
-		1
-
-	DistanceLabel.Text =
-		"[ ? studs ]"
-
-	DistanceLabel.TextColor3 =
-		Color3.fromRGB(
-			255,
-			255,
-			255
-		)
-
-	DistanceLabel.TextStrokeColor3 =
-		Color3.fromRGB(
-			0,
-			0,
-			0
-		)
-
-	DistanceLabel.TextStrokeTransparency =
-		0
-
-	DistanceLabel.TextSize =
-		14
-
-	DistanceLabel.Font =
-		Enum.Font.GothamBold
-
-	DistanceLabel.Visible =
-		espDistanceEnabled
-
-	DistanceLabel.Parent =
-		Billboard
-
-	return Billboard
-
+	return billboard
 end
 
---========================================================--
--- ATUALIZAR ESP
---========================================================--
-
-local function updateESP(player)
-
+local function updatePlayerESP(player)
 	if player == LocalPlayer then
 		return
 	end
 
-	local character =
-		player.Character
-
+	local character = player.Character
 	if not character then
 		return
 	end
 
-	local targetRoot =
-		character:FindFirstChild(
-			"HumanoidRootPart"
-		)
-
-	local head =
-		character:FindFirstChild(
-			"Head"
-		)
-
-	if not targetRoot
-		or not head
-	then
+	local targetRoot = character:FindFirstChild("HumanoidRootPart")
+	local head = character:FindFirstChild("Head")
+	if not targetRoot or not head then
 		return
 	end
 
-	local Billboard =
-		getESP(player)
-
-	if not Billboard
-		and (
-			espNameEnabled
-			or
-			espDistanceEnabled
-		)
-	then
-
-		Billboard =
-			createESP(player)
-
+	local billboard = getPlayerESP(player)
+	if not billboard and (espNameEnabled or espDistanceEnabled) then
+		billboard = createPlayerESP(player)
 	end
 
-	if not Billboard then
+	if not billboard then
 		return
 	end
 
-	local NameLabel =
-		Billboard:FindFirstChild(
-			"NameLabel"
-		)
+	local nameLabel = billboard:FindFirstChild("NameLabel")
+	local distanceLabel = billboard:FindFirstChild("DistanceLabel")
 
-	local DistanceLabel =
-		Billboard:FindFirstChild(
-			"DistanceLabel"
-		)
-
-	if NameLabel then
-
-		NameLabel.Visible =
-			espNameEnabled
-
-		NameLabel.Text =
-			player.DisplayName
-			..
-			" [@"
-			..
-			player.Name
-			..
-			"]"
-
-		-- Atualiza a cor do nome em tempo real conforme a Tool detectada.
-		NameLabel.TextColor3 =
-			getPlayerWeaponColor(
-				player
-			)
-
+	if nameLabel then
+		nameLabel.Visible = espNameEnabled
+		nameLabel.Text = player.DisplayName .. " [@" .. player.Name .. "]"
+		nameLabel.TextColor3 = getPlayerWeaponColor(player)
 	end
 
-	if DistanceLabel then
-
-		DistanceLabel.Visible =
-			espDistanceEnabled
+	if distanceLabel then
+		distanceLabel.Visible = espDistanceEnabled
 
 		if espDistanceEnabled then
-
-			local localCharacter =
-				LocalPlayer.Character
-
-			local localRoot =
-				localCharacter
-				and
-				localCharacter:
-				FindFirstChild(
-					"HumanoidRootPart"
-				)
+			local localCharacter = LocalPlayer.Character
+			local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
 
 			if localRoot then
-
-				local distance =
-					(
-						localRoot.Position
-						-
-						targetRoot.Position
-					).Magnitude
-
-				distance =
-					math.floor(
-						distance + 0.5
-					)
-
-				DistanceLabel.Text =
-					"[ "
-					..
-					tostring(distance)
-					..
-					" studs ]"
-
+				local distance = (localRoot.Position - targetRoot.Position).Magnitude
+				distanceLabel.Text = "[ " .. tostring(math.floor(distance + 0.5)) .. " studs ]"
 			else
-
-				DistanceLabel.Text =
-					"[ ? studs ]"
-
+				distanceLabel.Text = "[ ? studs ]"
 			end
-
 		end
-
 	end
+end
 
+local function removePlayerESP(player)
+	local esp = getPlayerESP(player)
+	if esp then
+		esp:Destroy()
+	end
+end
+
+local function removeAllPlayerESP()
+	for _, player in ipairs(Players:GetPlayers()) do
+		removePlayerESP(player)
+	end
 end
 
 --========================================================--
--- REMOVER ESP
+-- GUN DROP ESP - SISTEMA OTIMIZADO E ORIENTADO A EVENTOS
 --========================================================--
 
-local function removeESP(player)
-
-	local ESP =
-		getESP(player)
-
-	if ESP then
-		ESP:Destroy()
-	end
-
-end
-
-
-local function removeAllESP()
-
-	for _, player
-		in ipairs(
-			Players:GetPlayers()
-		)
-	do
-
-		removeESP(player)
-
-	end
-
-end
-
---========================================================--
--- ESP GUNDROP
---========================================================--
-
-local GUNDROP_COLOR =
-	Color3.fromRGB(
-		255,
-		140,
-		0
-	)
-
-
--- Verifica se um objeto está dentro do Character de algum jogador.
--- Isso é importante porque, quando a arma é pega/equipada, ela pode
--- continuar existindo dentro da Workspace, mas passa a ficar dentro
--- do Model do jogador. Nesse caso ela NÃO deve mais ser tratada como drop.
 local function isInsidePlayerCharacter(instance)
-
 	if not instance then
 		return false
 	end
 
-	for _, player
-		in ipairs(
-			Players:GetPlayers()
-		)
-	do
-
-		local character =
-			player.Character
-
-		if character
-			and instance:IsDescendantOf(character)
-		then
-
+	for _, player in ipairs(Players:GetPlayers()) do
+		local character = player.Character
+		if character and instance:IsDescendantOf(character) then
 			return true
-
 		end
-
 	end
 
 	return false
-
 end
 
-
 local function isValidGunDrop(gunDrop)
-
-	if not gunDrop
-		or not gunDrop.Parent
-	then
-
+	if not gunDrop or not gunDrop.Parent then
 		return false
-
 	end
 
-	-- Precisa continuar realmente dentro da Workspace.
+	if gunDrop.Name ~= "GunDrop" then
+		return false
+	end
+
 	if not gunDrop:IsDescendantOf(workspace) then
 		return false
 	end
 
-	-- Se foi equipado por algum jogador, deixa de ser um drop válido.
 	if isInsidePlayerCharacter(gunDrop) then
 		return false
 	end
 
-	-- Proteção extra caso GunDrop seja um filho de uma Tool equipada.
-	local toolAncestor =
-		gunDrop:FindFirstAncestorOfClass(
-			"Tool"
-		)
-
-	if toolAncestor
-		and isInsidePlayerCharacter(toolAncestor)
-	then
-
+	local toolAncestor = gunDrop:FindFirstAncestorOfClass("Tool")
+	if toolAncestor and isInsidePlayerCharacter(toolAncestor) then
 		return false
-
 	end
 
 	return true
-
 end
-
-
-local function findGunDrop()
-
-	-- Procura em qualquer lugar da Workspace, mas ignora GunDrop
-	-- que já tenha sido pego e esteja dentro do Character de alguém.
-	for _, object
-		in ipairs(
-			workspace:GetDescendants()
-		)
-	do
-
-		if object.Name == "GunDrop"
-			and isValidGunDrop(object)
-		then
-
-			return object
-
-		end
-
-	end
-
-	return nil
-
-end
-
 
 local function getGunDropAdornee(gunDrop)
-
 	if not gunDrop then
 		return nil
 	end
 
-	-- Caso o próprio GunDrop seja uma Part/MeshPart/etc.
 	if gunDrop:IsA("BasePart") then
 		return gunDrop
 	end
 
-	-- Caso seja Tool, tenta primeiro o Handle.
 	if gunDrop:IsA("Tool") then
-
-		local handle =
-			gunDrop:FindFirstChild(
-				"Handle"
-			)
-
-		if handle
-			and handle:IsA("BasePart")
-		then
+		local handle = gunDrop:FindFirstChild("Handle")
+		if handle and handle:IsA("BasePart") then
 			return handle
 		end
-
 	end
 
-	-- Caso seja Model, usa PrimaryPart quando existir.
-	if gunDrop:IsA("Model")
-		and gunDrop.PrimaryPart
-	then
+	if gunDrop:IsA("Model") and gunDrop.PrimaryPart then
 		return gunDrop.PrimaryPart
 	end
 
-	-- Fallback para qualquer BasePart dentro do GunDrop.
-	return gunDrop:FindFirstChildWhichIsA(
-		"BasePart",
-		true
-	)
-
+	return gunDrop:FindFirstChildWhichIsA("BasePart", true)
 end
 
+local unregisterGunDrop
+local registerGunDrop
+local findReplacementGunDrop
 
--- Remove qualquer ESP antigo que tenha ficado órfão na Workspace.
--- Isso resolve casos em que a arma foi coletada/reparentada e a referência
--- local do Billboard ficou desatualizada.
-local function removeStaleGunDropBillboards()
-
-	for _, object
-		in ipairs(
-			workspace:GetDescendants()
-		)
-	do
-
-		if object:IsA("BillboardGui")
-			and object.Name == "B1tSampl3_GunDropESP"
-		then
-
-			pcall(
-				function()
-					object:Destroy()
-				end
-			)
-
-		end
-
+unregisterGunDrop = function(gunDrop)
+	local entry = GunDropEntries[gunDrop]
+	if not entry then
+		return
 	end
 
-end
-
-
-local function removeGunDropESP()
-
-	if GunDropBillboard then
-
-		pcall(
-			function()
-				GunDropBillboard:Destroy()
-			end
-		)
-
+	if entry.AncestryConnection then
+		pcall(function()
+			entry.AncestryConnection:Disconnect()
+		end)
 	end
 
-	-- Limpa também qualquer Billboard órfão que tenha sobrado.
-	removeStaleGunDropBillboards()
+	if entry.Billboard then
+		pcall(function()
+			entry.Billboard:Destroy()
+		end)
+	end
 
-	GunDropBillboard = nil
-	CurrentGunDrop = nil
-	gunDropFound = false
+	if entry.Highlight then
+		pcall(function()
+			entry.Highlight:Destroy()
+		end)
+	end
 
+	GunDropEntries[gunDrop] = nil
 end
 
+registerGunDrop = function(gunDrop)
+	if not gunDropESPEnabled then
+		return
+	end
 
-local function createGunDropESP(gunDrop)
+	if GunDropEntries[gunDrop] then
+		return
+	end
 
 	if not isValidGunDrop(gunDrop) then
-		return nil
+		return
 	end
 
-	local adornee =
-		getGunDropAdornee(
-			gunDrop
-		)
-
-	if not adornee
-		or not adornee.Parent
-	then
-		return nil
+	local adornee = getGunDropAdornee(gunDrop)
+	if not adornee or not adornee.Parent or isInsidePlayerCharacter(adornee) then
+		return
 	end
 
-	removeGunDropESP()
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "B1tSampl3_GunDropESP"
+	billboard.Adornee = adornee
+	billboard.Size = UDim2.new(0, 230, 0, 62)
+	billboard.StudsOffset = Vector3.new(0, 2.8, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 5000
+	billboard.Parent = PlayerGui
 
-	CurrentGunDrop =
-		gunDrop
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "DropNameLabel"
+	nameLabel.Size = UDim2.new(1, 0, 0, 30)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = "GUN DROP"
+	nameLabel.TextColor3 = GUNDROP_COLOR
+	nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	nameLabel.TextStrokeTransparency = 0
+	nameLabel.TextSize = 17
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.Parent = billboard
 
-	gunDropFound =
-		true
+	local distanceLabel = Instance.new("TextLabel")
+	distanceLabel.Name = "DropDistanceLabel"
+	distanceLabel.Size = UDim2.new(1, 0, 0, 25)
+	distanceLabel.Position = UDim2.new(0, 0, 0, 28)
+	distanceLabel.BackgroundTransparency = 1
+	distanceLabel.Text = "[ ? studs ]"
+	distanceLabel.TextColor3 = GUNDROP_COLOR
+	distanceLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	distanceLabel.TextStrokeTransparency = 0
+	distanceLabel.TextSize = 14
+	distanceLabel.Font = Enum.Font.GothamBold
+	distanceLabel.Parent = billboard
 
-	local Billboard =
-		Instance.new(
-			"BillboardGui"
-		)
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "B1tSampl3_GunDropHighlight"
+	highlight.Adornee = gunDrop
+	highlight.FillColor = GUNDROP_COLOR
+	highlight.FillTransparency = 0.78
+	highlight.OutlineColor = GUNDROP_COLOR
+	highlight.OutlineTransparency = 0.05
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = gunDrop
 
-	Billboard.Name =
-		"B1tSampl3_GunDropESP"
+	local entry = {
+		Object = gunDrop,
+		Adornee = adornee,
+		Billboard = billboard,
+		DistanceLabel = distanceLabel,
+		Highlight = highlight,
+		AncestryConnection = nil,
+	}
 
-	Billboard.Adornee =
-		adornee
+	GunDropEntries[gunDrop] = entry
 
-	Billboard.Size =
-		UDim2.new(
-			0,
-			220,
-			0,
-			60
-		)
+	entry.AncestryConnection = gunDrop.AncestryChanged:Connect(function()
+		if destroyed then
+			return
+		end
 
-	Billboard.StudsOffset =
-		Vector3.new(
-			0,
-			2.5,
-			0
-		)
+		-- Remove imediatamente quando o GunDrop é coletado, equipado,
+		-- movido para o Backpack ou deixa de ser um drop válido.
+		if not gunDropESPEnabled or not isValidGunDrop(gunDrop) then
+			unregisterGunDrop(gunDrop)
 
-	Billboard.AlwaysOnTop =
-		true
-
-	Billboard.MaxDistance =
-		5000
-
-	Billboard.Parent =
-		adornee
-
-	local NameLabel =
-		Instance.new(
-			"TextLabel"
-		)
-
-	NameLabel.Name =
-		"DropNameLabel"
-
-	NameLabel.Size =
-		UDim2.new(
-			1,
-			0,
-			0,
-			30
-		)
-
-	NameLabel.BackgroundTransparency =
-		1
-
-	NameLabel.Text =
-		"GUN DROP"
-
-	NameLabel.TextColor3 =
-		GUNDROP_COLOR
-
-	NameLabel.TextStrokeColor3 =
-		Color3.fromRGB(
-			0,
-			0,
-			0
-		)
-
-	NameLabel.TextStrokeTransparency =
-		0
-
-	NameLabel.TextSize =
-		17
-
-	NameLabel.Font =
-		Enum.Font.GothamBold
-
-	NameLabel.Parent =
-		Billboard
-
-	local DistanceLabel =
-		Instance.new(
-			"TextLabel"
-		)
-
-	DistanceLabel.Name =
-		"DropDistanceLabel"
-
-	DistanceLabel.Size =
-		UDim2.new(
-			1,
-			0,
-			0,
-			25
-		)
-
-	DistanceLabel.Position =
-		UDim2.new(
-			0,
-			0,
-			0,
-			28
-		)
-
-	DistanceLabel.BackgroundTransparency =
-		1
-
-	DistanceLabel.Text =
-		"[ ? studs ]"
-
-	DistanceLabel.TextColor3 =
-		GUNDROP_COLOR
-
-	DistanceLabel.TextStrokeColor3 =
-		Color3.fromRGB(
-			0,
-			0,
-			0
-		)
-
-	DistanceLabel.TextStrokeTransparency =
-		0
-
-	DistanceLabel.TextSize =
-		14
-
-	DistanceLabel.Font =
-		Enum.Font.GothamBold
-
-	DistanceLabel.Parent =
-		Billboard
-
-	GunDropBillboard =
-		Billboard
-
-	return Billboard
-
+			if gunDropESPEnabled and findReplacementGunDrop then
+				task.defer(findReplacementGunDrop)
+			end
+		end
+	end)
 end
 
+local function clearAllGunDrops()
+	local list = {}
+	for gunDrop in pairs(GunDropEntries) do
+		table.insert(list, gunDrop)
+	end
 
-local function updateGunDropESP()
+	for _, gunDrop in ipairs(list) do
+		unregisterGunDrop(gunDrop)
+	end
+end
 
+findReplacementGunDrop = function()
+	if not gunDropESPEnabled or destroyed then
+		return
+	end
+
+	-- Busca recursiva apenas quando necessário. Não roda em loop.
+	local first = workspace:FindFirstChild("GunDrop", true)
+	if first and isValidGunDrop(first) then
+		registerGunDrop(first)
+		return
+	end
+
+	-- Fallback raro: só é usado quando o primeiro GunDrop encontrado está
+	-- dentro de um Character ou não é um drop válido.
+	if first then
+		for _, object in ipairs(workspace:GetDescendants()) do
+			if object.Name == "GunDrop" and isValidGunDrop(object) then
+				registerGunDrop(object)
+				return
+			end
+		end
+	end
+end
+
+local function enableGunDropESP()
+	gunDropESPEnabled = true
+	findReplacementGunDrop()
+end
+
+local function disableGunDropESP()
+	gunDropESPEnabled = false
+	clearAllGunDrops()
+end
+
+local function updateGunDropDistances()
 	if not gunDropESPEnabled then
-
-		removeGunDropESP()
-		return
-
-	end
-
-	local gunDrop =
-		findGunDrop()
-
-	-- Nenhum drop válido existe mais: remove o ESP imediatamente.
-	if not gunDrop then
-
-		removeGunDropESP()
-		return
-
-	end
-
-	-- Se a referência anterior foi pega/equipada, ela deixa de ser válida.
-	if CurrentGunDrop
-		and not isValidGunDrop(CurrentGunDrop)
-	then
-
-		removeGunDropESP()
-
-	end
-
-	local adornee =
-		getGunDropAdornee(
-			gunDrop
-		)
-
-	if not adornee
-		or not adornee.Parent
-		or not adornee:IsDescendantOf(workspace)
-		or isInsidePlayerCharacter(adornee)
-	then
-
-		removeGunDropESP()
-		return
-
-	end
-
-	-- Se apareceu outra GunDrop, o Billboard sumiu, ou o Billboard ficou
-	-- preso em uma peça antiga, recria do zero.
-	if CurrentGunDrop ~= gunDrop
-		or not GunDropBillboard
-		or not GunDropBillboard.Parent
-		or GunDropBillboard.Adornee ~= adornee
-	then
-
-		createGunDropESP(
-			gunDrop
-		)
-
-	end
-
-	if not GunDropBillboard
-		or not GunDropBillboard.Parent
-	then
 		return
 	end
 
-	-- Validação final a cada atualização para evitar ESP fantasma.
-	if not isValidGunDrop(gunDrop)
-		or isInsidePlayerCharacter(gunDrop)
-	then
+	local localCharacter = LocalPlayer.Character
+	local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
 
-		removeGunDropESP()
-		return
+	local invalid = {}
 
+	for gunDrop, entry in pairs(GunDropEntries) do
+		if not isValidGunDrop(gunDrop)
+			or not entry.Adornee
+			or not entry.Adornee.Parent
+			or isInsidePlayerCharacter(entry.Adornee)
+		then
+			table.insert(invalid, gunDrop)
+		elseif localRoot and entry.DistanceLabel then
+			local distance = (localRoot.Position - entry.Adornee.Position).Magnitude
+			entry.DistanceLabel.Text = "[ " .. tostring(math.floor(distance + 0.5)) .. " studs ]"
+		elseif entry.DistanceLabel then
+			entry.DistanceLabel.Text = "[ ? studs ]"
+		end
 	end
 
-	gunDropFound =
-		true
-
-	local DistanceLabel =
-		GunDropBillboard:FindFirstChild(
-			"DropDistanceLabel"
-		)
-
-	local localCharacter =
-		LocalPlayer.Character
-
-	local localRoot =
-		localCharacter
-		and localCharacter:FindFirstChild(
-			"HumanoidRootPart"
-		)
-
-	if DistanceLabel
-		and localRoot
-	then
-
-		local distance =
-			(
-				localRoot.Position
-				-
-				adornee.Position
-			).Magnitude
-
-		distance =
-			math.floor(
-				distance + 0.5
-			)
-
-		DistanceLabel.Text =
-			"[ "
-			..
-			tostring(distance)
-			..
-			" studs ]"
-
-	elseif DistanceLabel then
-
-		DistanceLabel.Text =
-			"[ ? studs ]"
-
+	for _, gunDrop in ipairs(invalid) do
+		unregisterGunDrop(gunDrop)
 	end
 
+	if #invalid > 0 and countGunDrops() == 0 then
+		findReplacementGunDrop()
+	end
 end
 
 --========================================================--
--- GUI
+-- GUI BASE
 --========================================================--
 
-local oldGUI =
-	PlayerGui:FindFirstChild(
-		"B1tSampl3HubController"
-	)
-
+local oldGUI = PlayerGui:FindFirstChild("B1tSampl3HubController")
 if oldGUI then
 	oldGUI:Destroy()
 end
 
-
-local ScreenGui =
-	Instance.new(
-		"ScreenGui"
-	)
-
-ScreenGui.Name =
-	"B1tSampl3HubController"
-
-ScreenGui.ResetOnSpawn =
-	false
-
-ScreenGui.ZIndexBehavior =
-	Enum.ZIndexBehavior.Sibling
-
-ScreenGui.Parent =
-	PlayerGui
-
---========================================================--
--- JANELA
---========================================================--
-
-local NORMAL_SIZE =
-	UDim2.new(
-		0,
-		370,
-		0,
-		920
-	)
-
-local MINIMIZED_SIZE =
-	UDim2.new(
-		0,
-		370,
-		0,
-		45
-	)
-
-
-local MainFrame =
-	Instance.new(
-		"Frame"
-	)
-
-MainFrame.Size =
-	NORMAL_SIZE
-
-MainFrame.Position =
-	UDim2.new(
-		0,
-		30,
-		0,
-		80
-	)
-
-MainFrame.BackgroundColor3 =
-	Color3.fromRGB(
-		25,
-		25,
-		25
-	)
-
-MainFrame.BorderSizePixel =
-	0
-
-MainFrame.ClipsDescendants =
-	true
-
-MainFrame.Parent =
-	ScreenGui
-
-
-local MainCorner =
-	Instance.new(
-		"UICorner"
-	)
-
-MainCorner.CornerRadius =
-	UDim.new(
-		0,
-		12
-	)
-
-MainCorner.Parent =
-	MainFrame
-
---========================================================--
--- TOP BAR
---========================================================--
-
-local TopBar =
-	Instance.new(
-		"Frame"
-	)
-
-TopBar.Size =
-	UDim2.new(
-		1,
-		0,
-		0,
-		45
-	)
-
-TopBar.BackgroundColor3 =
-	Color3.fromRGB(
-		18,
-		18,
-		18
-	)
-
-TopBar.BorderSizePixel =
-	0
-
-TopBar.Active =
-	true
-
-TopBar.Parent =
-	MainFrame
-
-
-local Title =
-	Instance.new(
-		"TextLabel"
-	)
-
-Title.Size =
-	UDim2.new(
-		1,
-		-110,
-		1,
-		0
-	)
-
-Title.Position =
-	UDim2.new(
-		0,
-		15,
-		0,
-		0
-	)
-
-Title.BackgroundTransparency =
-	1
-
-Title.Text =
-	"B1tSampl3 HUB"
-
-Title.TextColor3 =
-	Color3.fromRGB(
-		0,
-		255,
-		100
-	)
-
-Title.TextSize =
-	19
-
-Title.Font =
-	Enum.Font.GothamBold
-
-Title.TextXAlignment =
-	Enum.TextXAlignment.Left
-
-Title.Parent =
-	TopBar
-
---========================================================--
--- MINIMIZAR
---========================================================--
-
-local MinimizeButton =
-	Instance.new(
-		"TextButton"
-	)
-
-MinimizeButton.Size =
-	UDim2.new(
-		0,
-		30,
-		0,
-		30
-	)
-
-MinimizeButton.Position =
-	UDim2.new(
-		1,
-		-76,
-		0,
-		7
-	)
-
-MinimizeButton.BackgroundColor3 =
-	Color3.fromRGB(
-		70,
-		70,
-		70
-	)
-
-MinimizeButton.Text =
-	"—"
-
-MinimizeButton.TextColor3 =
-	Color3.new(
-		1,
-		1,
-		1
-	)
-
-MinimizeButton.TextSize =
-	18
-
-MinimizeButton.Font =
-	Enum.Font.GothamBold
-
-MinimizeButton.Parent =
-	TopBar
-
-
-local MinimizeCorner =
-	Instance.new(
-		"UICorner"
-	)
-
-MinimizeCorner.CornerRadius =
-	UDim.new(
-		1,
-		0
-	)
-
-MinimizeCorner.Parent =
-	MinimizeButton
-
---========================================================--
--- FECHAR
---========================================================--
-
-local CloseButton =
-	Instance.new(
-		"TextButton"
-	)
-
-CloseButton.Size =
-	UDim2.new(
-		0,
-		30,
-		0,
-		30
-	)
-
-CloseButton.Position =
-	UDim2.new(
-		1,
-		-38,
-		0,
-		7
-	)
-
-CloseButton.BackgroundColor3 =
-	Color3.fromRGB(
-		220,
-		50,
-		50
-	)
-
-CloseButton.Text =
-	"X"
-
-CloseButton.TextColor3 =
-	Color3.new(
-		1,
-		1,
-		1
-	)
-
-CloseButton.TextSize =
-	15
-
-CloseButton.Font =
-	Enum.Font.GothamBold
-
-CloseButton.Parent =
-	TopBar
-
-
-local CloseCorner =
-	Instance.new(
-		"UICorner"
-	)
-
-CloseCorner.CornerRadius =
-	UDim.new(
-		1,
-		0
-	)
-
-CloseCorner.Parent =
-	CloseButton
-
---========================================================--
--- ÁREA DE CONTEÚDO
---========================================================--
-
-local Content =
-	Instance.new(
-		"Frame"
-	)
-
-Content.Size =
-	UDim2.new(
-		1,
-		0,
-		1,
-		-45
-	)
-
-Content.Position =
-	UDim2.new(
-		0,
-		0,
-		0,
-		45
-	)
-
-Content.BackgroundTransparency =
-	1
-
-Content.Parent =
-	MainFrame
-
---========================================================--
--- FUNÇÕES DE UI
---========================================================--
-
-local function addCorner(object, radius)
-
-	local corner =
-		Instance.new(
-			"UICorner"
-		)
-
-	corner.CornerRadius =
-		UDim.new(
-			0,
-			radius or 8
-		)
-
-	corner.Parent =
-		object
-
-	return corner
-
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "B1tSampl3HubController"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = PlayerGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 800, 0, 560)
+MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+MainFrame.BackgroundColor3 = Theme.Background
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+addCorner(MainFrame, 16)
+addStroke(MainFrame, Theme.Border, 1, 0.15)
+
+local Scale = Instance.new("UIScale")
+Scale.Scale = 1
+Scale.Parent = MainFrame
+
+local function updateScale()
+	Camera = workspace.CurrentCamera
+	if not Camera then
+		return
+	end
+
+	local viewport = Camera.ViewportSize
+	local scaleX = (viewport.X - 40) / 800
+	local scaleY = (viewport.Y - 40) / 560
+	Scale.Scale = math.min(1, math.max(0.58, math.min(scaleX, scaleY)))
 end
 
-
-local function newLabel(
-	text,
-	y
-)
-
-	local label =
-		Instance.new(
-			"TextLabel"
-		)
-
-	label.Size =
-		UDim2.new(
-			1,
-			-30,
-			0,
-			30
-		)
-
-	label.Position =
-		UDim2.new(
-			0,
-			15,
-			0,
-			y
-		)
-
-	label.BackgroundTransparency =
-		1
-
-	label.Text =
-		text
-
-	label.TextColor3 =
-		Color3.new(
-			1,
-			1,
-			1
-		)
-
-	label.TextSize =
-		15
-
-	label.Font =
-		Enum.Font.GothamBold
-
-	label.Parent =
-		Content
-
-	return label
-
+updateScale()
+if Camera then
+	trackConnection(Camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale))
 end
 
+local AccentLine = Instance.new("Frame")
+AccentLine.Name = "AccentLine"
+AccentLine.Size = UDim2.new(1, 0, 0, 3)
+AccentLine.BackgroundColor3 = Theme.Accent
+AccentLine.BorderSizePixel = 0
+AccentLine.Parent = MainFrame
+addGradient(AccentLine, Theme.Accent, Theme.Accent2, 0)
 
-local function newButton(
-	text,
-	y
-)
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.Size = UDim2.new(1, 0, 0, 62)
+TopBar.Position = UDim2.new(0, 0, 0, 3)
+TopBar.BackgroundColor3 = Theme.Surface
+TopBar.BorderSizePixel = 0
+TopBar.Active = true
+TopBar.Parent = MainFrame
 
-	local button =
-		Instance.new(
-			"TextButton"
-		)
+local BrandIcon = Instance.new("Frame")
+BrandIcon.Size = UDim2.new(0, 38, 0, 38)
+BrandIcon.Position = UDim2.new(0, 18, 0, 12)
+BrandIcon.BackgroundColor3 = Theme.Accent
+BrandIcon.BorderSizePixel = 0
+BrandIcon.Parent = TopBar
+addCorner(BrandIcon, 11)
+addGradient(BrandIcon, Theme.Accent, Theme.Accent2, 45)
 
-	button.Size =
-		UDim2.new(
-			0.82,
-			0,
-			0,
-			40
-		)
+local BrandLetter = Instance.new("TextLabel")
+BrandLetter.Size = UDim2.new(1, 0, 1, 0)
+BrandLetter.BackgroundTransparency = 1
+BrandLetter.Text = "B"
+BrandLetter.TextColor3 = Color3.fromRGB(255, 255, 255)
+BrandLetter.TextSize = 20
+BrandLetter.Font = Enum.Font.GothamBold
+BrandLetter.Parent = BrandIcon
 
-	button.Position =
-		UDim2.new(
-			0.09,
-			0,
-			0,
-			y
-		)
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(0, 300, 0, 26)
+Title.Position = UDim2.new(0, 68, 0, 9)
+Title.BackgroundTransparency = 1
+Title.Text = "B1tSampl3 HUB"
+Title.TextColor3 = Theme.Text
+Title.TextSize = 20
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TopBar
 
-	button.BackgroundColor3 =
-		Color3.fromRGB(
-			45,
-			100,
-			190
-		)
+local Subtitle = Instance.new("TextLabel")
+Subtitle.Size = UDim2.new(0, 330, 0, 20)
+Subtitle.Position = UDim2.new(0, 68, 0, 34)
+Subtitle.BackgroundTransparency = 1
+Subtitle.Text = "Painel de utilidades • interface moderna"
+Subtitle.TextColor3 = Theme.Muted
+Subtitle.TextSize = 12
+Subtitle.Font = Enum.Font.Gotham
+Subtitle.TextXAlignment = Enum.TextXAlignment.Left
+Subtitle.Parent = TopBar
 
-	button.Text =
-		text
+local OnlineDot = Instance.new("Frame")
+OnlineDot.Size = UDim2.new(0, 8, 0, 8)
+OnlineDot.Position = UDim2.new(1, -178, 0, 27)
+OnlineDot.BackgroundColor3 = Theme.Success
+OnlineDot.BorderSizePixel = 0
+OnlineDot.Parent = TopBar
+addCorner(OnlineDot, 8)
 
-	button.TextColor3 =
-		Color3.new(
-			1,
-			1,
-			1
-		)
+local OnlineLabel = Instance.new("TextLabel")
+OnlineLabel.Size = UDim2.new(0, 85, 0, 24)
+OnlineLabel.Position = UDim2.new(1, -164, 0, 19)
+OnlineLabel.BackgroundTransparency = 1
+OnlineLabel.Text = "HUB ATIVO"
+OnlineLabel.TextColor3 = Theme.Muted
+OnlineLabel.TextSize = 11
+OnlineLabel.Font = Enum.Font.GothamBold
+OnlineLabel.TextXAlignment = Enum.TextXAlignment.Left
+OnlineLabel.Parent = TopBar
 
-	button.TextSize =
-		15
+local HideTopButton = Instance.new("TextButton")
+HideTopButton.Size = UDim2.new(0, 38, 0, 32)
+HideTopButton.Position = UDim2.new(1, -54, 0, 15)
+HideTopButton.BackgroundColor3 = Theme.Surface3
+HideTopButton.BorderSizePixel = 0
+HideTopButton.Text = "—"
+HideTopButton.TextColor3 = Theme.Text
+HideTopButton.TextSize = 17
+HideTopButton.Font = Enum.Font.GothamBold
+HideTopButton.AutoButtonColor = false
+HideTopButton.Parent = TopBar
+addCorner(HideTopButton, 9)
+addStroke(HideTopButton, Theme.Border, 1, 0.25)
 
-	button.Font =
-		Enum.Font.GothamBold
+local Sidebar = Instance.new("Frame")
+Sidebar.Name = "Sidebar"
+Sidebar.Size = UDim2.new(0, 176, 1, -65)
+Sidebar.Position = UDim2.new(0, 0, 0, 65)
+Sidebar.BackgroundColor3 = Color3.fromRGB(17, 20, 28)
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = MainFrame
 
-	button.Parent =
-		Content
+local SidebarGradient = addGradient(Sidebar, Color3.fromRGB(20, 23, 33), Color3.fromRGB(14, 16, 23), 90)
+SidebarGradient.Offset = Vector2.new(0, 0)
 
-	addCorner(
-		button,
-		8
-	)
+local SidebarDivider = Instance.new("Frame")
+SidebarDivider.Size = UDim2.new(0, 1, 1, 0)
+SidebarDivider.Position = UDim2.new(1, -1, 0, 0)
+SidebarDivider.BackgroundColor3 = Theme.Border
+SidebarDivider.BackgroundTransparency = 0.45
+SidebarDivider.BorderSizePixel = 0
+SidebarDivider.Parent = Sidebar
+
+local NavigationTitle = Instance.new("TextLabel")
+NavigationTitle.Size = UDim2.new(1, -28, 0, 22)
+NavigationTitle.Position = UDim2.new(0, 14, 0, 18)
+NavigationTitle.BackgroundTransparency = 1
+NavigationTitle.Text = "NAVEGAÇÃO"
+NavigationTitle.TextColor3 = Theme.Muted
+NavigationTitle.TextSize = 10
+NavigationTitle.Font = Enum.Font.GothamBold
+NavigationTitle.TextXAlignment = Enum.TextXAlignment.Left
+NavigationTitle.Parent = Sidebar
+
+local PageContainer = Instance.new("Frame")
+PageContainer.Name = "PageContainer"
+PageContainer.Size = UDim2.new(1, -176, 1, -65)
+PageContainer.Position = UDim2.new(0, 176, 0, 65)
+PageContainer.BackgroundTransparency = 1
+PageContainer.Parent = MainFrame
+
+local Pages = {}
+local TabButtons = {}
+
+local function createPage(name, titleText, subtitleText)
+	local page = Instance.new("ScrollingFrame")
+	page.Name = name .. "Page"
+	page.Size = UDim2.new(1, 0, 1, 0)
+	page.BackgroundTransparency = 1
+	page.BorderSizePixel = 0
+	page.ScrollBarThickness = 4
+	page.ScrollBarImageColor3 = Theme.Accent
+	page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	page.CanvasSize = UDim2.new(0, 0, 0, 0)
+	page.Visible = false
+	page.Parent = PageContainer
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, 22)
+	padding.PaddingBottom = UDim.new(0, 22)
+	padding.PaddingLeft = UDim.new(0, 24)
+	padding.PaddingRight = UDim.new(0, 24)
+	padding.Parent = page
+
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 14)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = page
+
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.Size = UDim2.new(1, 0, 0, 54)
+	header.BackgroundTransparency = 1
+	header.LayoutOrder = 0
+	header.Parent = page
+
+	local heading = Instance.new("TextLabel")
+	heading.Size = UDim2.new(1, 0, 0, 28)
+	heading.BackgroundTransparency = 1
+	heading.Text = titleText
+	heading.TextColor3 = Theme.Text
+	heading.TextSize = 23
+	heading.Font = Enum.Font.GothamBold
+	heading.TextXAlignment = Enum.TextXAlignment.Left
+	heading.Parent = header
+
+	local subheading = Instance.new("TextLabel")
+	subheading.Size = UDim2.new(1, 0, 0, 20)
+	subheading.Position = UDim2.new(0, 0, 0, 31)
+	subheading.BackgroundTransparency = 1
+	subheading.Text = subtitleText
+	subheading.TextColor3 = Theme.Muted
+	subheading.TextSize = 12
+	subheading.Font = Enum.Font.Gotham
+	subheading.TextXAlignment = Enum.TextXAlignment.Left
+	subheading.Parent = header
+
+	Pages[name] = page
+	return page
+end
+
+local function createCard(parent, titleText, descriptionText, height, order)
+	local card = Instance.new("Frame")
+	card.Size = UDim2.new(1, 0, 0, height)
+	card.BackgroundColor3 = Theme.Surface
+	card.BorderSizePixel = 0
+	card.LayoutOrder = order or 1
+	card.Parent = parent
+	addCorner(card, 13)
+	addStroke(card, Theme.Border, 1, 0.35)
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Size = UDim2.new(1, -28, 0, 24)
+	titleLabel.Position = UDim2.new(0, 14, 0, 12)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Text = titleText
+	titleLabel.TextColor3 = Theme.Text
+	titleLabel.TextSize = 15
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.Parent = card
+
+	local descriptionLabel = Instance.new("TextLabel")
+	descriptionLabel.Size = UDim2.new(1, -28, 0, 34)
+	descriptionLabel.Position = UDim2.new(0, 14, 0, 38)
+	descriptionLabel.BackgroundTransparency = 1
+	descriptionLabel.Text = descriptionText
+	descriptionLabel.TextColor3 = Theme.Muted
+	descriptionLabel.TextSize = 11
+	descriptionLabel.Font = Enum.Font.Gotham
+	descriptionLabel.TextWrapped = true
+	descriptionLabel.TextXAlignment = Enum.TextXAlignment.Left
+	descriptionLabel.TextYAlignment = Enum.TextYAlignment.Top
+	descriptionLabel.Parent = card
+
+	return card
+end
+
+local function createActionButton(parent, text, width, xScale, xOffset, y, accent, danger)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(0, width, 0, 36)
+	button.Position = UDim2.new(xScale or 0, xOffset or 0, 0, y)
+	button.BackgroundColor3 = danger and Theme.Danger or (accent and Theme.Accent or Theme.Surface3)
+	button.BorderSizePixel = 0
+	button.Text = text
+	button.TextColor3 = Theme.Text
+	button.TextSize = 12
+	button.Font = Enum.Font.GothamBold
+	button.AutoButtonColor = false
+	button.Parent = parent
+	addCorner(button, 9)
+	addStroke(button, danger and Theme.Danger or (accent and Theme.Accent or Theme.Border), 1, 0.35)
+
+	if accent and not danger then
+		addGradient(button, Theme.Accent, Theme.Accent2, 0)
+	end
+
+	trackConnection(button.MouseEnter:Connect(function()
+		tween(button, 0.15, {BackgroundTransparency = 0.08})
+	end))
+
+	trackConnection(button.MouseLeave:Connect(function()
+		tween(button, 0.15, {BackgroundTransparency = 0})
+	end))
 
 	return button
-
 end
 
+local function createStatusPill(parent, text, x, y, width)
+	local pill = Instance.new("TextLabel")
+	pill.Size = UDim2.new(0, width or 120, 0, 28)
+	pill.Position = UDim2.new(0, x, 0, y)
+	pill.BackgroundColor3 = Theme.Surface3
+	pill.BorderSizePixel = 0
+	pill.Text = text
+	pill.TextColor3 = Theme.Muted
+	pill.TextSize = 11
+	pill.Font = Enum.Font.GothamBold
+	pill.Parent = parent
+	addCorner(pill, 14)
+	addStroke(pill, Theme.Border, 1, 0.45)
+	return pill
+end
 
-local function newSmallButton(
-	text,
-	x,
-	y
-)
+local function createTab(name, text, order)
+	local button = Instance.new("TextButton")
+	button.Name = name .. "TabButton"
+	button.Size = UDim2.new(1, -20, 0, 42)
+	button.Position = UDim2.new(0, 10, 0, 48 + ((order - 1) * 48))
+	button.BackgroundColor3 = Theme.Surface2
+	button.BackgroundTransparency = 1
+	button.BorderSizePixel = 0
+	button.Text = text
+	button.TextColor3 = Theme.Muted
+	button.TextSize = 13
+	button.Font = Enum.Font.GothamBold
+	button.TextXAlignment = Enum.TextXAlignment.Left
+	button.AutoButtonColor = false
+	button.Parent = Sidebar
+	addCorner(button, 10)
 
-	local button =
-		Instance.new(
-			"TextButton"
-		)
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, 14)
+	padding.Parent = button
 
-	button.Size =
-		UDim2.new(
-			0,
-			55,
-			0,
-			34
-		)
+	local indicator = Instance.new("Frame")
+	indicator.Name = "Indicator"
+	indicator.Size = UDim2.new(0, 3, 0, 22)
+	indicator.Position = UDim2.new(0, 0, 0.5, -11)
+	indicator.BackgroundColor3 = Theme.Accent
+	indicator.BorderSizePixel = 0
+	indicator.Visible = false
+	indicator.Parent = button
+	addCorner(indicator, 3)
+	addGradient(indicator, Theme.Accent, Theme.Accent2, 90)
 
-	button.Position =
-		UDim2.new(
-			0,
-			x,
-			0,
-			y
-		)
-
-	button.BackgroundColor3 =
-		Color3.fromRGB(
-			65,
-			65,
-			65
-		)
-
-	button.Text =
-		text
-
-	button.TextColor3 =
-		Color3.new(
-			1,
-			1,
-			1
-		)
-
-	button.TextSize =
-		20
-
-	button.Font =
-		Enum.Font.GothamBold
-
-	button.Parent =
-		Content
-
-	addCorner(
-		button,
-		7
-	)
-
+	TabButtons[name] = button
 	return button
+end
 
+local HitBoxPage = createPage("HitBox", "HitBox", "Ajuste o tamanho e a transparência da hitbox dos outros jogadores.")
+local ESPPage = createPage("ESP", "ESP", "Visualização de jogadores, armas e GunDrop com atualização otimizada.")
+local AimPage = createPage("AimLock", "AimLock", "Selecione um alvo, configure a distância e use uma tecla de atalho.")
+local SettingsPage = createPage("Settings", "Configurações", "Personalize o HUB, o atalho de visibilidade e as opções gerais.")
+local CreditsPage = createPage("Credits", "Créditos", "Informações sobre o desenvolvimento do B1tSampl3 HUB.")
+
+createTab("HitBox", "HitBox", 1)
+createTab("ESP", "ESP", 2)
+createTab("AimLock", "AimLock", 3)
+createTab("Settings", "Configurações", 4)
+createTab("Credits", "Créditos", 5)
+
+local function showTab(name)
+	currentTab = name
+
+	for pageName, page in pairs(Pages) do
+		page.Visible = pageName == name
+	end
+
+	for tabName, button in pairs(TabButtons) do
+		local selected = tabName == name
+		button.BackgroundTransparency = selected and 0 or 1
+		button.TextColor3 = selected and Theme.Text or Theme.Muted
+
+		local indicator = button:FindFirstChild("Indicator")
+		if indicator then
+			indicator.Visible = selected
+		end
+	end
+end
+
+for name, button in pairs(TabButtons) do
+	local tabName = name
+	trackConnection(button.MouseButton1Click:Connect(function()
+		showTab(tabName)
+	end))
 end
 
 --========================================================--
--- HITBOX UI
+-- HITBOX PAGE
 --========================================================--
 
-local HitboxStatus =
-	newLabel(
-		"HitBox: DESATIVADA",
-		8
-	)
+local HitboxMainCard = createCard(HitBoxPage, "HitBox dos jogadores", "Ative ou desative a expansão visual da HumanoidRootPart dos outros jogadores.", 122, 1)
+local HitboxStatus = createStatusPill(HitboxMainCard, "DESATIVADA", 14, 80, 118)
+local ToggleHitbox = createActionButton(HitboxMainCard, "ATIVAR HITBOX", 160, 1, -174, 76, true, false)
 
+local HitboxSizeCard = createCard(HitBoxPage, "Tamanho da HitBox", "Ajuste o tamanho aplicado à HumanoidRootPart.", 116, 2)
+local SizeMinus = createActionButton(HitboxSizeCard, "−", 42, 0, 14, 65, false, false)
+local SizeValue = createStatusPill(HitboxSizeCard, tostring(HITBOX_SIZE), 66, 69, 86)
+local SizePlus = createActionButton(HitboxSizeCard, "+", 42, 0, 162, 65, false, false)
 
-local ToggleHitbox =
-	newButton(
-		"ATIVAR HITBOX",
-		38
-	)
-
-
-local SizeLabel =
-	newLabel(
-		"Tamanho: 11",
-		88
-	)
-
-
-local SizeMinus =
-	newSmallButton(
-		"-",
-		120,
-		118
-	)
-
-
-local SizePlus =
-	newSmallButton(
-		"+",
-		195,
-		118
-	)
-
-
-local TransparencyLabel =
-	newLabel(
-		"Transparência: 0.8",
-		160
-	)
-
-
-local TransparencyMinus =
-	newSmallButton(
-		"-",
-		120,
-		190
-	)
-
-
-local TransparencyPlus =
-	newSmallButton(
-		"+",
-		195,
-		190
-	)
+local HitboxTransparencyCard = createCard(HitBoxPage, "Transparência", "Controle a transparência da hitbox expandida.", 116, 3)
+local TransparencyMinus = createActionButton(HitboxTransparencyCard, "−", 42, 0, 14, 65, false, false)
+local TransparencyValue = createStatusPill(HitboxTransparencyCard, string.format("%.1f", HITBOX_TRANSPARENCY), 66, 69, 86)
+local TransparencyPlus = createActionButton(HitboxTransparencyCard, "+", 42, 0, 162, 65, false, false)
 
 --========================================================--
--- ESP NAME
+-- ESP PAGE
 --========================================================--
 
-local ESPNameStatus =
-	newLabel(
-		"ESP Name: DESATIVADO",
-		235
-	)
+local PlayerESPCard = createCard(ESPPage, "ESP de jogadores", "Nome e distância dos jogadores. A cor do nome muda conforme a arma carregada.", 168, 1)
+local ESPNameStatus = createStatusPill(PlayerESPCard, "NOME: OFF", 14, 78, 112)
+local ToggleESPName = createActionButton(PlayerESPCard, "ALTERNAR NOME", 150, 0, 138, 74, true, false)
+local ESPDistanceStatus = createStatusPill(PlayerESPCard, "DISTÂNCIA: OFF", 14, 122, 112)
+local ToggleESPDistance = createActionButton(PlayerESPCard, "ALTERNAR DISTÂNCIA", 150, 0, 138, 118, true, false)
 
+local WeaponLegend = Instance.new("TextLabel")
+WeaponLegend.Size = UDim2.new(1, -316, 0, 72)
+WeaponLegend.Position = UDim2.new(0, 306, 0, 78)
+WeaponLegend.BackgroundTransparency = 1
+WeaponLegend.Text = "● Knife: vermelho\n● Gun: azul\n● Sem arma: verde"
+WeaponLegend.TextColor3 = Theme.Muted
+WeaponLegend.TextSize = 11
+WeaponLegend.Font = Enum.Font.Gotham
+WeaponLegend.TextXAlignment = Enum.TextXAlignment.Left
+WeaponLegend.TextYAlignment = Enum.TextYAlignment.Top
+WeaponLegend.Parent = PlayerESPCard
 
-local ToggleESPName =
-	newButton(
-		"ATIVAR ESP NAME",
-		265
-	)
+local GunDropCard = createCard(ESPPage, "ESP GunDrop", "Detecta GunDrop no mapa sem varrer a Workspace continuamente. O ESP some assim que a arma é coletada.", 138, 2)
+local GunDropStatus = createStatusPill(GunDropCard, "DESATIVADO", 14, 84, 150)
+local ToggleGunDropESP = createActionButton(GunDropCard, "ATIVAR GUNDROP", 170, 1, -184, 80, true, false)
 
---========================================================--
--- ESP DISTÂNCIA
---========================================================--
-
-local ESPDistanceStatus =
-	newLabel(
-		"ESP Distância: DESATIVADO",
-		315
-	)
-
-
-local ToggleESPDistance =
-	newButton(
-		"ATIVAR ESP DISTÂNCIA",
-		345
-	)
+local PerformanceCard = createCard(ESPPage, "Desempenho", "O GunDrop agora usa eventos DescendantAdded/Removing e AncestryChanged. A busca recursiva só acontece quando necessário, eliminando o scan completo a cada atualização.", 108, 3)
 
 --========================================================--
--- ESP GUNDROP
+-- AIMLOCK PAGE
 --========================================================--
 
-local GunDropStatus =
-	newLabel(
-		"GunDrop ESP: DESATIVADO",
-		395
-	)
+local AimMainCard = createCard(AimPage, "AimLock", "Ative o AimLock e segure o botão direito do mouse para travar a câmera no alvo selecionado.", 124, 1)
+local AimStatus = createStatusPill(AimMainCard, "DESATIVADO", 14, 82, 120)
+local ToggleAim = createActionButton(AimMainCard, "ATIVAR AIMLOCK", 170, 1, -184, 78, true, false)
 
+local TargetCard = createCard(AimPage, "Selecionar alvo", "Clique no botão para atualizar a lista de jogadores disponíveis.", 214, 2)
+local TargetButton = createActionButton(TargetCard, "Alvo: NENHUM", 260, 0, 14, 72, false, false)
 
-local ToggleGunDropESP =
-	newButton(
-		"ATIVAR ESP GUN DROP",
-		425
-	)
+local PlayerList = Instance.new("ScrollingFrame")
+PlayerList.Size = UDim2.new(1, -28, 0, 92)
+PlayerList.Position = UDim2.new(0, 14, 0, 112)
+PlayerList.BackgroundColor3 = Theme.Surface2
+PlayerList.BorderSizePixel = 0
+PlayerList.ScrollBarThickness = 4
+PlayerList.ScrollBarImageColor3 = Theme.Accent
+PlayerList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+PlayerList.CanvasSize = UDim2.new(0, 0, 0, 0)
+PlayerList.Visible = false
+PlayerList.Parent = TargetCard
+addCorner(PlayerList, 9)
+addStroke(PlayerList, Theme.Border, 1, 0.4)
 
-ToggleGunDropESP.BackgroundColor3 =
-	Color3.fromRGB(
-		210,
-		120,
-		20
-	)
+local PlayerListLayout = Instance.new("UIListLayout")
+PlayerListLayout.Padding = UDim.new(0, 5)
+PlayerListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+PlayerListLayout.Parent = PlayerList
 
---========================================================--
--- AIMLOCK
---========================================================--
+local PlayerListPadding = Instance.new("UIPadding")
+PlayerListPadding.PaddingTop = UDim.new(0, 6)
+PlayerListPadding.PaddingBottom = UDim.new(0, 6)
+PlayerListPadding.PaddingLeft = UDim.new(0, 6)
+PlayerListPadding.PaddingRight = UDim.new(0, 6)
+PlayerListPadding.Parent = PlayerList
 
-local AimStatus =
-	newLabel(
-		"AimLock: DESATIVADO",
-		475
-	)
+local AimDistanceCard = createCard(AimPage, "Distância máxima", "Limite de distância para o AimLock continuar acompanhando o alvo.", 116, 3)
+local AimDistanceMinus = createActionButton(AimDistanceCard, "−", 42, 0, 14, 65, false, false)
+local AimDistanceValue = createStatusPill(AimDistanceCard, tostring(AIM_MAX_DISTANCE) .. " studs", 66, 69, 118)
+local AimDistancePlus = createActionButton(AimDistanceCard, "+", 42, 0, 194, 65, false, false)
 
-
-local ToggleAim =
-	newButton(
-		"ATIVAR AIMLOCK",
-		505
-	)
-
-
-local TargetButton =
-	newButton(
-		"Alvo: NENHUM",
-		555
-	)
-
-
-local AimDistanceLabel =
-	newLabel(
-		"Distância Aim: "
-		..
-		AIM_MAX_DISTANCE
-		..
-		" studs",
-		605
-	)
-
-
-local AimDistanceMinus =
-	newSmallButton(
-		"-",
-		120,
-		635
-	)
-
-
-local AimDistancePlus =
-	newSmallButton(
-		"+",
-		195,
-		635
-	)
+local AimKeyCard = createCard(AimPage, "Tecla do AimLock", "Use uma tecla para ativar ou desativar o AimLock sem voltar ao painel.", 126, 4)
+local AimKeyLabel = createStatusPill(AimKeyCard, "TECLA: " .. AIM_TOGGLE_KEY.Name, 14, 84, 130)
+local AimKeyButton = createActionButton(AimKeyCard, "DEFINIR TECLA", 170, 1, -184, 80, true, false)
 
 --========================================================--
--- TECLA DO AIMLOCK
+-- SETTINGS PAGE
 --========================================================--
 
-local AimKeybindLabel =
-	newLabel(
-		"Tecla AimLock: Q",
-		680
-	)
+local VisibilityCard = createCard(SettingsPage, "Visibilidade do HUB", "A tecla configurada esconde e mostra a interface. O HUB continua funcionando enquanto estiver oculto.", 146, 1)
+local HubKeyLabel = createStatusPill(VisibilityCard, "TECLA: " .. HUB_TOGGLE_KEY.Name, 14, 84, 130)
+local HubKeyButton = createActionButton(VisibilityCard, "DEFINIR TECLA", 170, 1, -184, 80, true, false)
+local HideHubButton = createActionButton(VisibilityCard, "OCULTAR AGORA", 170, 1, -184, 122, false, false)
+HideHubButton.Position = UDim2.new(1, -184, 0, 122)
 
+-- Ajuste de altura porque há dois botões na área inferior.
+VisibilityCard.Size = UDim2.new(1, 0, 0, 174)
 
-local AimKeybindButton =
-	newButton(
-		"DEFINIR TECLA",
-		710
-	)
-
---========================================================--
--- LISTA DE JOGADORES
---========================================================--
-
-local PlayerList =
-	Instance.new(
-		"ScrollingFrame"
-	)
-
-PlayerList.Size =
-	UDim2.new(
-		0.82,
-		0,
-		0,
-		145
-	)
-
-PlayerList.Position =
-	UDim2.new(
-		0.09,
-		0,
-		0,
-		595
-	)
-
-PlayerList.BackgroundColor3 =
-	Color3.fromRGB(
-		15,
-		15,
-		15
-	)
-
-PlayerList.BorderSizePixel =
-	0
-
-PlayerList.ScrollBarThickness =
-	5
-
-PlayerList.AutomaticCanvasSize =
-	Enum.AutomaticSize.Y
-
-PlayerList.CanvasSize =
-	UDim2.new()
-
-PlayerList.Visible =
-	false
-
-PlayerList.ZIndex =
-	20
-
-PlayerList.Parent =
-	Content
-
-addCorner(
-	PlayerList,
-	8
-)
-
-
-local PlayerListLayout =
-	Instance.new(
-		"UIListLayout"
-	)
-
-PlayerListLayout.Padding =
-	UDim.new(
-		0,
-		5
-	)
-
-PlayerListLayout.Parent =
-	PlayerList
-
-
-local PlayerListPadding =
-	Instance.new(
-		"UIPadding"
-	)
-
-PlayerListPadding.PaddingTop =
-	UDim.new(
-		0,
-		5
-	)
-
-PlayerListPadding.PaddingBottom =
-	UDim.new(
-		0,
-		5
-	)
-
-PlayerListPadding.PaddingLeft =
-	UDim.new(
-		0,
-		5
-	)
-
-PlayerListPadding.PaddingRight =
-	UDim.new(
-		0,
-		5
-	)
-
-PlayerListPadding.Parent =
-	PlayerList
+local DestroyCard = createCard(SettingsPage, "Remover HUB", "Destrói a interface, desconecta eventos e desativa todas as funções do HUB nesta execução.", 128, 2)
+local DestroyHubButton = createActionButton(DestroyCard, "DESTRUIR HUB", 190, 0, 14, 78, false, true)
 
 --========================================================--
--- INFORMAÇÃO AIMLOCK
+-- CREDITS PAGE
 --========================================================--
 
-local AimInfo =
-	newLabel(
-		"Segure botão direito para travar no alvo",
-		765
-	)
+local CreditsCard = createCard(CreditsPage, "Studio B1tSampl3", "Projeto desenvolvido para reunir as funções do HUB em uma interface organizada, leve e apresentável.", 250, 1)
 
-AimInfo.TextColor3 =
-	Color3.fromRGB(
-		160,
-		160,
-		160
-	)
+local CreditsIcon = Instance.new("Frame")
+CreditsIcon.Size = UDim2.new(0, 64, 0, 64)
+CreditsIcon.Position = UDim2.new(0, 14, 0, 82)
+CreditsIcon.BackgroundColor3 = Theme.Accent
+CreditsIcon.BorderSizePixel = 0
+CreditsIcon.Parent = CreditsCard
+addCorner(CreditsIcon, 18)
+addGradient(CreditsIcon, Theme.Accent, Theme.Accent2, 45)
 
-AimInfo.TextSize =
-	12
+local CreditsLetter = Instance.new("TextLabel")
+CreditsLetter.Size = UDim2.new(1, 0, 1, 0)
+CreditsLetter.BackgroundTransparency = 1
+CreditsLetter.Text = "B"
+CreditsLetter.TextColor3 = Color3.fromRGB(255, 255, 255)
+CreditsLetter.TextSize = 30
+CreditsLetter.Font = Enum.Font.GothamBold
+CreditsLetter.Parent = CreditsIcon
+
+local CreditsInfo = Instance.new("TextLabel")
+CreditsInfo.Size = UDim2.new(1, -106, 0, 126)
+CreditsInfo.Position = UDim2.new(0, 94, 0, 82)
+CreditsInfo.BackgroundTransparency = 1
+CreditsInfo.Text = "Desenvolvido pelo Studio B1tSampl3\n\nDesenvolvedor Script\nFOXSTYLISH_YT\n\nUI Designer\nFOXSTYLISH_YT"
+CreditsInfo.TextColor3 = Theme.Text
+CreditsInfo.TextSize = 13
+CreditsInfo.Font = Enum.Font.Gotham
+CreditsInfo.TextXAlignment = Enum.TextXAlignment.Left
+CreditsInfo.TextYAlignment = Enum.TextYAlignment.Top
+CreditsInfo.Parent = CreditsCard
+
+local CreditsFooter = Instance.new("TextLabel")
+CreditsFooter.Size = UDim2.new(1, -28, 0, 24)
+CreditsFooter.Position = UDim2.new(0, 14, 1, -38)
+CreditsFooter.BackgroundTransparency = 1
+CreditsFooter.Text = "B1tSampl3 HUB • Feito com cuidado por FOXSTYLISH_YT"
+CreditsFooter.TextColor3 = Theme.Muted
+CreditsFooter.TextSize = 11
+CreditsFooter.Font = Enum.Font.Gotham
+CreditsFooter.TextXAlignment = Enum.TextXAlignment.Left
+CreditsFooter.Parent = CreditsCard
 
 --========================================================--
 -- ATUALIZAR INTERFACE
 --========================================================--
 
 local function updateInterface()
-
-	SizeLabel.Text =
-		"Tamanho: "
-		..
-		tostring(
-			HITBOX_SIZE
-		)
-
-	TransparencyLabel.Text =
-		"Transparência: "
-		..
-		string.format(
-			"%.1f",
-			HITBOX_TRANSPARENCY
-		)
-
-	AimDistanceLabel.Text =
-		"Distância Aim: "
-		..
-		tostring(
-			AIM_MAX_DISTANCE
-		)
-		..
-		" studs"
-
-	--------------------------------------------------
-	-- HITBOX
-	--------------------------------------------------
+	SizeValue.Text = tostring(HITBOX_SIZE)
+	TransparencyValue.Text = string.format("%.1f", HITBOX_TRANSPARENCY)
+	AimDistanceValue.Text = tostring(AIM_MAX_DISTANCE) .. " studs"
 
 	if hitboxEnabled then
-
-		HitboxStatus.Text =
-			"HitBox: ATIVADA"
-
-		HitboxStatus.TextColor3 =
-			Color3.fromRGB(
-				80,
-				255,
-				100
-			)
-
-		ToggleHitbox.Text =
-			"DESATIVAR HITBOX"
-
-		ToggleHitbox.BackgroundColor3 =
-			Color3.fromRGB(
-				190,
-				55,
-				55
-			)
-
+		HitboxStatus.Text = "ATIVADA"
+		HitboxStatus.TextColor3 = Theme.Success
+		ToggleHitbox.Text = "DESATIVAR HITBOX"
 	else
-
-		HitboxStatus.Text =
-			"HitBox: DESATIVADA"
-
-		HitboxStatus.TextColor3 =
-			Color3.fromRGB(
-				255,
-				80,
-				80
-			)
-
-		ToggleHitbox.Text =
-			"ATIVAR HITBOX"
-
-		ToggleHitbox.BackgroundColor3 =
-			Color3.fromRGB(
-				30,
-				160,
-				70
-			)
-
+		HitboxStatus.Text = "DESATIVADA"
+		HitboxStatus.TextColor3 = Theme.Muted
+		ToggleHitbox.Text = "ATIVAR HITBOX"
 	end
 
-	--------------------------------------------------
-	-- ESP NAME
-	--------------------------------------------------
+	ESPNameStatus.Text = espNameEnabled and "NOME: ON" or "NOME: OFF"
+	ESPNameStatus.TextColor3 = espNameEnabled and Theme.Success or Theme.Muted
 
-	if espNameEnabled then
-
-		ESPNameStatus.Text =
-			"ESP Name: ATIVADO"
-
-		ESPNameStatus.TextColor3 =
-			Color3.fromRGB(
-				80,
-				255,
-				100
-			)
-
-		ToggleESPName.Text =
-			"DESATIVAR ESP NAME"
-
-		ToggleESPName.BackgroundColor3 =
-			Color3.fromRGB(
-				190,
-				55,
-				55
-			)
-
-	else
-
-		ESPNameStatus.Text =
-			"ESP Name: DESATIVADO"
-
-		ESPNameStatus.TextColor3 =
-			Color3.fromRGB(
-				255,
-				80,
-				80
-			)
-
-		ToggleESPName.Text =
-			"ATIVAR ESP NAME"
-
-		ToggleESPName.BackgroundColor3 =
-			Color3.fromRGB(
-				45,
-				100,
-				190
-			)
-
-	end
-
-	--------------------------------------------------
-	-- ESP DISTÂNCIA
-	--------------------------------------------------
-
-	if espDistanceEnabled then
-
-		ESPDistanceStatus.Text =
-			"ESP Distância: ATIVADO"
-
-		ESPDistanceStatus.TextColor3 =
-			Color3.fromRGB(
-				80,
-				255,
-				100
-			)
-
-		ToggleESPDistance.Text =
-			"DESATIVAR ESP DISTÂNCIA"
-
-		ToggleESPDistance.BackgroundColor3 =
-			Color3.fromRGB(
-				190,
-				55,
-				55
-			)
-
-	else
-
-		ESPDistanceStatus.Text =
-			"ESP Distância: DESATIVADO"
-
-		ESPDistanceStatus.TextColor3 =
-			Color3.fromRGB(
-				255,
-				80,
-				80
-			)
-
-		ToggleESPDistance.Text =
-			"ATIVAR ESP DISTÂNCIA"
-
-		ToggleESPDistance.BackgroundColor3 =
-			Color3.fromRGB(
-				45,
-				100,
-				190
-			)
-
-	end
-
-	--------------------------------------------------
-	-- ESP GUNDROP
-	--------------------------------------------------
+	ESPDistanceStatus.Text = espDistanceEnabled and "DISTÂNCIA: ON" or "DISTÂNCIA: OFF"
+	ESPDistanceStatus.TextColor3 = espDistanceEnabled and Theme.Success or Theme.Muted
 
 	if gunDropESPEnabled then
-
-		if gunDropFound then
-
-			GunDropStatus.Text =
-				"GunDrop ESP: ARMA ENCONTRADA"
-
-			GunDropStatus.TextColor3 =
-				Color3.fromRGB(
-					255,
-					160,
-					30
-				)
-
+		local total = countGunDrops()
+		if total > 0 then
+			GunDropStatus.Text = total == 1 and "1 ARMA ENCONTRADA" or (tostring(total) .. " ARMAS ENCONTRADAS")
+			GunDropStatus.TextColor3 = Theme.Warning
 		else
-
-			GunDropStatus.Text =
-				"GunDrop ESP: PROCURANDO..."
-
-			GunDropStatus.TextColor3 =
-				Color3.fromRGB(
-					255,
-					190,
-					80
-				)
-
+			GunDropStatus.Text = "PROCURANDO..."
+			GunDropStatus.TextColor3 = Theme.Warning
 		end
-
-		ToggleGunDropESP.Text =
-			"DESATIVAR ESP GUN DROP"
-
-		ToggleGunDropESP.BackgroundColor3 =
-			Color3.fromRGB(
-				190,
-				55,
-				55
-			)
-
+		ToggleGunDropESP.Text = "DESATIVAR GUNDROP"
 	else
-
-		GunDropStatus.Text =
-			"GunDrop ESP: DESATIVADO"
-
-		GunDropStatus.TextColor3 =
-			Color3.fromRGB(
-				255,
-				80,
-				80
-			)
-
-		ToggleGunDropESP.Text =
-			"ATIVAR ESP GUN DROP"
-
-		ToggleGunDropESP.BackgroundColor3 =
-			Color3.fromRGB(
-				210,
-				120,
-				20
-			)
-
+		GunDropStatus.Text = "DESATIVADO"
+		GunDropStatus.TextColor3 = Theme.Muted
+		ToggleGunDropESP.Text = "ATIVAR GUNDROP"
 	end
-
-	--------------------------------------------------
-	-- TECLA DO AIMLOCK
-	--------------------------------------------------
-
-	if waitingAimKeybind then
-
-		AimKeybindLabel.Text =
-			"Tecla AimLock: aguardando..."
-
-		AimKeybindLabel.TextColor3 =
-			Color3.fromRGB(
-				255,
-				200,
-				70
-			)
-
-		AimKeybindButton.Text =
-			"PRESSIONE UMA TECLA..."
-
-		AimKeybindButton.BackgroundColor3 =
-			Color3.fromRGB(
-				190,
-				130,
-				30
-			)
-
-	else
-
-		AimKeybindLabel.Text =
-			"Tecla AimLock: "
-			..
-			AIM_TOGGLE_KEY.Name
-
-		AimKeybindLabel.TextColor3 =
-			Color3.fromRGB(
-				255,
-				255,
-				255
-			)
-
-		AimKeybindButton.Text =
-			"DEFINIR TECLA"
-
-		AimKeybindButton.BackgroundColor3 =
-			Color3.fromRGB(
-				80,
-				80,
-				160
-			)
-
-	end
-
-	--------------------------------------------------
-	-- AIMLOCK
-	--------------------------------------------------
 
 	if aimlockEnabled then
-
-		AimStatus.Text =
-			"AimLock: ATIVADO"
-
-		AimStatus.TextColor3 =
-			Color3.fromRGB(
-				80,
-				255,
-				100
-			)
-
-		ToggleAim.Text =
-			"DESATIVAR AIMLOCK"
-
-		ToggleAim.BackgroundColor3 =
-			Color3.fromRGB(
-				190,
-				55,
-				55
-			)
-
+		AimStatus.Text = "ATIVADO"
+		AimStatus.TextColor3 = Theme.Success
+		ToggleAim.Text = "DESATIVAR AIMLOCK"
 	else
-
-		AimStatus.Text =
-			"AimLock: DESATIVADO"
-
-		AimStatus.TextColor3 =
-			Color3.fromRGB(
-				255,
-				80,
-				80
-			)
-
-		ToggleAim.Text =
-			"ATIVAR AIMLOCK"
-
-		ToggleAim.BackgroundColor3 =
-			Color3.fromRGB(
-				45,
-				100,
-				190
-			)
-
+		AimStatus.Text = "DESATIVADO"
+		AimStatus.TextColor3 = Theme.Muted
+		ToggleAim.Text = "ATIVAR AIMLOCK"
 	end
 
-	if selectedTarget
-		and selectedTarget.Parent
-	then
-
-		TargetButton.Text =
-			"Alvo: "
-			..
-			selectedTarget.DisplayName
-
+	if selectedTarget and selectedTarget.Parent then
+		TargetButton.Text = "Alvo: " .. selectedTarget.DisplayName
 	else
-
-		selectedTarget =
-			nil
-
-		TargetButton.Text =
-			"Alvo: NENHUM"
-
+		selectedTarget = nil
+		TargetButton.Text = "Alvo: NENHUM"
 	end
 
+	if waitingAimKeybind then
+		AimKeyLabel.Text = "PRESSIONE UMA TECLA..."
+		AimKeyLabel.TextColor3 = Theme.Warning
+		AimKeyButton.Text = "CANCELAR"
+	else
+		AimKeyLabel.Text = "TECLA: " .. AIM_TOGGLE_KEY.Name
+		AimKeyLabel.TextColor3 = Theme.Text
+		AimKeyButton.Text = "DEFINIR TECLA"
+	end
+
+	if waitingHubKeybind then
+		HubKeyLabel.Text = "PRESSIONE UMA TECLA..."
+		HubKeyLabel.TextColor3 = Theme.Warning
+		HubKeyButton.Text = "CANCELAR"
+	else
+		HubKeyLabel.Text = "TECLA: " .. HUB_TOGGLE_KEY.Name
+		HubKeyLabel.TextColor3 = Theme.Text
+		HubKeyButton.Text = "DEFINIR TECLA"
+	end
 end
 
 --========================================================--
@@ -2414,470 +1268,162 @@ end
 --========================================================--
 
 local function refreshPlayerList()
-
-	for _, object
-		in ipairs(
-			PlayerList:GetChildren()
-		)
-	do
-
-		if object:IsA(
-			"TextButton"
-		) then
-
+	for _, object in ipairs(PlayerList:GetChildren()) do
+		if object:IsA("TextButton") then
 			object:Destroy()
-
 		end
-
 	end
 
-	for _, player
-		in ipairs(
-			Players:GetPlayers()
-		)
-	do
-
+	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= LocalPlayer then
+			local playerButton = Instance.new("TextButton")
+			playerButton.Size = UDim2.new(1, -4, 0, 32)
+			playerButton.BackgroundColor3 = Theme.Surface3
+			playerButton.BorderSizePixel = 0
+			playerButton.Text = player.DisplayName .. " [@" .. player.Name .. "]"
+			playerButton.TextColor3 = Theme.Text
+			playerButton.TextSize = 11
+			playerButton.Font = Enum.Font.Gotham
+			playerButton.AutoButtonColor = false
+			playerButton.Parent = PlayerList
+			addCorner(playerButton, 7)
 
-			local PlayerButton =
-				Instance.new(
-					"TextButton"
-				)
-
-			PlayerButton.Size =
-				UDim2.new(
-					1,
-					-10,
-					0,
-					35
-				)
-
-			PlayerButton.BackgroundColor3 =
-				Color3.fromRGB(
-					45,
-					45,
-					45
-				)
-
-			PlayerButton.Text =
-				player.DisplayName
-				..
-				" [@"
-				..
-				player.Name
-				..
-				"]"
-
-			PlayerButton.TextColor3 =
-				Color3.new(
-					1,
-					1,
-					1
-				)
-
-			PlayerButton.TextSize =
-				13
-
-			PlayerButton.Font =
-				Enum.Font.Gotham
-
-			PlayerButton.ZIndex =
-				21
-
-			PlayerButton.Parent =
-				PlayerList
-
-			addCorner(
-				PlayerButton,
-				6
-			)
-
-			trackConnection(
-				PlayerButton
-				.MouseButton1Click:
-				Connect(
-					function()
-
-						selectedTarget =
-							player
-
-						PlayerList.Visible =
-							false
-
-						updateInterface()
-
-					end
-				)
-			)
-
+			local targetPlayer = player
+			trackConnection(playerButton.MouseButton1Click:Connect(function()
+				selectedTarget = targetPlayer
+				PlayerList.Visible = false
+				updateInterface()
+			end))
 		end
-
 	end
-
 end
 
 --========================================================--
--- HITBOX CONTROLES
+-- CONTROLES HITBOX
 --========================================================--
 
-trackConnection(
-	ToggleHitbox
-		.MouseButton1Click:
-		Connect(
-			function()
+trackConnection(ToggleHitbox.MouseButton1Click:Connect(function()
+	hitboxEnabled = not hitboxEnabled
+	if not hitboxEnabled then
+		restoreAllHitboxes()
+	end
+	updateInterface()
+end))
 
-				hitboxEnabled =
-					not hitboxEnabled
+trackConnection(SizeMinus.MouseButton1Click:Connect(function()
+	HITBOX_SIZE = math.max(HITBOX_MIN_SIZE, HITBOX_SIZE - HITBOX_SIZE_STEP)
+	updateInterface()
+end))
 
-				if not hitboxEnabled then
+trackConnection(SizePlus.MouseButton1Click:Connect(function()
+	HITBOX_SIZE = math.min(HITBOX_MAX_SIZE, HITBOX_SIZE + HITBOX_SIZE_STEP)
+	updateInterface()
+end))
 
-					restoreAllHitboxes()
+trackConnection(TransparencyMinus.MouseButton1Click:Connect(function()
+	HITBOX_TRANSPARENCY = math.max(0, HITBOX_TRANSPARENCY - HITBOX_TRANSPARENCY_STEP)
+	HITBOX_TRANSPARENCY = math.floor(HITBOX_TRANSPARENCY * 10 + 0.5) / 10
+	updateInterface()
+end))
 
-				end
-
-				updateInterface()
-
-			end
-		)
-)
-
-
-trackConnection(
-	SizeMinus
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				HITBOX_SIZE =
-					math.max(
-						MIN_SIZE,
-						HITBOX_SIZE
-						-
-						SIZE_STEP
-					)
-
-				updateInterface()
-
-			end
-		)
-)
-
-
-trackConnection(
-	SizePlus
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				HITBOX_SIZE =
-					math.min(
-						MAX_SIZE,
-						HITBOX_SIZE
-						+
-						SIZE_STEP
-					)
-
-				updateInterface()
-
-			end
-		)
-)
-
-
-trackConnection(
-	TransparencyMinus
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				HITBOX_TRANSPARENCY =
-					math.max(
-
-						MIN_TRANSPARENCY,
-
-						HITBOX_TRANSPARENCY
-						-
-						TRANSPARENCY_STEP
-
-					)
-
-				HITBOX_TRANSPARENCY =
-					math.round(
-						HITBOX_TRANSPARENCY
-						*
-						10
-					)
-					/
-					10
-
-				updateInterface()
-
-			end
-		)
-)
-
-
-trackConnection(
-	TransparencyPlus
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				HITBOX_TRANSPARENCY =
-					math.min(
-
-						MAX_TRANSPARENCY,
-
-						HITBOX_TRANSPARENCY
-						+
-						TRANSPARENCY_STEP
-
-					)
-
-				HITBOX_TRANSPARENCY =
-					math.round(
-						HITBOX_TRANSPARENCY
-						*
-						10
-					)
-					/
-					10
-
-				updateInterface()
-
-			end
-		)
-)
+trackConnection(TransparencyPlus.MouseButton1Click:Connect(function()
+	HITBOX_TRANSPARENCY = math.min(1, HITBOX_TRANSPARENCY + HITBOX_TRANSPARENCY_STEP)
+	HITBOX_TRANSPARENCY = math.floor(HITBOX_TRANSPARENCY * 10 + 0.5) / 10
+	updateInterface()
+end))
 
 --========================================================--
--- ESP CONTROLES
+-- CONTROLES ESP
 --========================================================--
 
-trackConnection(
-	ToggleESPName
-		.MouseButton1Click:
-		Connect(
-			function()
+trackConnection(ToggleESPName.MouseButton1Click:Connect(function()
+	espNameEnabled = not espNameEnabled
+	if not espNameEnabled and not espDistanceEnabled then
+		removeAllPlayerESP()
+	end
+	updateInterface()
+end))
 
-				espNameEnabled =
-					not espNameEnabled
+trackConnection(ToggleESPDistance.MouseButton1Click:Connect(function()
+	espDistanceEnabled = not espDistanceEnabled
+	if not espNameEnabled and not espDistanceEnabled then
+		removeAllPlayerESP()
+	end
+	updateInterface()
+end))
 
-				if not espNameEnabled
-					and not espDistanceEnabled
-				then
-
-					removeAllESP()
-
-				end
-
-				updateInterface()
-
-			end
-		)
-)
-
-
-trackConnection(
-	ToggleESPDistance
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				espDistanceEnabled =
-					not espDistanceEnabled
-
-				if not espNameEnabled
-					and not espDistanceEnabled
-				then
-
-					removeAllESP()
-
-				end
-
-				updateInterface()
-
-			end
-		)
-)
-
-trackConnection(
-	ToggleGunDropESP
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				gunDropESPEnabled =
-					not gunDropESPEnabled
-
-				if gunDropESPEnabled then
-
-					updateGunDropESP()
-
-				else
-
-					removeGunDropESP()
-
-				end
-
-				updateInterface()
-
-			end
-		)
-)
+trackConnection(ToggleGunDropESP.MouseButton1Click:Connect(function()
+	if gunDropESPEnabled then
+		disableGunDropESP()
+	else
+		enableGunDropESP()
+	end
+	updateInterface()
+end))
 
 --========================================================--
--- AIMLOCK CONTROLES
+-- CONTROLES AIMLOCK
 --========================================================--
 
-local function toggleAimlock()
-
-	aimlockEnabled =
-		not aimlockEnabled
+local function toggleAimLock()
+	aimlockEnabled = not aimlockEnabled
 
 	if not aimlockEnabled then
-
-		rightMouseHeld =
-			false
-
-		UserInputService.MouseBehavior =
-			Enum.MouseBehavior.Default
-
+		rightMouseHeld = false
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	end
 
 	updateInterface()
-
 end
 
+trackConnection(ToggleAim.MouseButton1Click:Connect(toggleAimLock))
 
-trackConnection(
-	ToggleAim
-		.MouseButton1Click:
-		Connect(
-			function()
+trackConnection(TargetButton.MouseButton1Click:Connect(function()
+	refreshPlayerList()
+	PlayerList.Visible = not PlayerList.Visible
+end))
 
-				toggleAimlock()
+trackConnection(AimDistanceMinus.MouseButton1Click:Connect(function()
+	AIM_MAX_DISTANCE = math.max(AIM_MIN_DISTANCE, AIM_MAX_DISTANCE - AIM_DISTANCE_STEP)
+	updateInterface()
+end))
 
-			end
-		)
-)
+trackConnection(AimDistancePlus.MouseButton1Click:Connect(function()
+	AIM_MAX_DISTANCE = math.min(AIM_MAX_LIMIT, AIM_MAX_DISTANCE + AIM_DISTANCE_STEP)
+	updateInterface()
+end))
 
-
-trackConnection(
-	AimKeybindButton
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				waitingAimKeybind =
-					not waitingAimKeybind
-
-				updateInterface()
-
-			end
-		)
-)
-
-
-trackConnection(
-	TargetButton
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				refreshPlayerList()
-
-				PlayerList.Visible =
-					not PlayerList.Visible
-
-			end
-		)
-)
-
-
-trackConnection(
-	AimDistanceMinus
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				AIM_MAX_DISTANCE =
-					math.max(
-
-						AIM_MIN_DISTANCE,
-
-						AIM_MAX_DISTANCE
-						-
-						AIM_DISTANCE_STEP
-
-					)
-
-				updateInterface()
-
-			end
-		)
-)
-
-
-trackConnection(
-	AimDistancePlus
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				AIM_MAX_DISTANCE =
-					math.min(
-
-						AIM_MAX_LIMIT,
-
-						AIM_MAX_DISTANCE
-						+
-						AIM_DISTANCE_STEP
-
-					)
-
-				updateInterface()
-
-			end
-		)
-)
+trackConnection(AimKeyButton.MouseButton1Click:Connect(function()
+	waitingHubKeybind = false
+	waitingAimKeybind = not waitingAimKeybind
+	updateInterface()
+end))
 
 --========================================================--
--- MINIMIZAR
+-- CONFIGURAÇÕES
 --========================================================--
 
-trackConnection(
-	MinimizeButton
-		.MouseButton1Click:
-		Connect(
-			function()
+local function setHubVisible(visible)
+	MainFrame.Visible = visible
+end
 
-				minimized =
-					not minimized
+local function toggleHubVisible()
+	setHubVisible(not MainFrame.Visible)
+end
 
-				Content.Visible =
-					not minimized
+trackConnection(HubKeyButton.MouseButton1Click:Connect(function()
+	waitingAimKeybind = false
+	waitingHubKeybind = not waitingHubKeybind
+	updateInterface()
+end))
 
-				if minimized then
+trackConnection(HideHubButton.MouseButton1Click:Connect(function()
+	setHubVisible(false)
+end))
 
-					MainFrame.Size =
-						MINIMIZED_SIZE
-
-					MinimizeButton.Text =
-						"+"
-
-				else
-
-					MainFrame.Size =
-						NORMAL_SIZE
-
-					MinimizeButton.Text =
-						"—"
-
-				end
-
-			end
-		)
-)
+trackConnection(HideTopButton.MouseButton1Click:Connect(function()
+	setHubVisible(false)
+end))
 
 --========================================================--
 -- ARRASTAR JANELA
@@ -2888,433 +1434,217 @@ local dragInput = nil
 local dragStart = nil
 local startPosition = nil
 
+trackConnection(TopBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+	then
+		dragging = true
+		dragStart = input.Position
+		startPosition = MainFrame.Position
+	end
+end))
 
-trackConnection(
-	TopBar.InputBegan:
-		Connect(
-			function(input)
+trackConnection(TopBar.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch
+	then
+		dragInput = input
+	end
+end))
 
-				if input.UserInputType
-						==
-						Enum.UserInputType.MouseButton1
-
-					or
-
-					input.UserInputType
-						==
-						Enum.UserInputType.Touch
-				then
-
-					dragging =
-						true
-
-					dragStart =
-						input.Position
-
-					startPosition =
-						MainFrame.Position
-
-				end
-
-			end
+trackConnection(UserInputService.InputChanged:Connect(function(input)
+	if dragging and input == dragInput then
+		local delta = input.Position - dragStart
+		MainFrame.Position = UDim2.new(
+			startPosition.X.Scale,
+			startPosition.X.Offset + delta.X,
+			startPosition.Y.Scale,
+			startPosition.Y.Offset + delta.Y
 		)
-)
+	end
+end))
 
+trackConnection(UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+	then
+		dragging = false
+	end
 
-trackConnection(
-	TopBar.InputChanged:
-		Connect(
-			function(input)
-
-				if input.UserInputType
-						==
-						Enum.UserInputType.MouseMovement
-
-					or
-
-					input.UserInputType
-						==
-						Enum.UserInputType.Touch
-				then
-
-					dragInput =
-						input
-
-				end
-
-			end
-		)
-)
-
-
-trackConnection(
-	UserInputService.InputChanged:
-		Connect(
-			function(input)
-
-				if dragging
-					and input
-						==
-						dragInput
-				then
-
-					local delta =
-						input.Position
-						-
-						dragStart
-
-					MainFrame.Position =
-						UDim2.new(
-
-							startPosition.X.Scale,
-
-							startPosition.X.Offset
-								+
-								delta.X,
-
-							startPosition.Y.Scale,
-
-							startPosition.Y.Offset
-								+
-								delta.Y
-
-						)
-
-				end
-
-			end
-		)
-)
-
-
-trackConnection(
-	UserInputService.InputEnded:
-		Connect(
-			function(input)
-
-				if input.UserInputType
-						==
-						Enum.UserInputType.MouseButton1
-
-					or
-
-					input.UserInputType
-						==
-						Enum.UserInputType.Touch
-				then
-
-					dragging =
-						false
-
-				end
-
-			end
-		)
-)
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		rightMouseHeld = false
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	end
+end))
 
 --========================================================--
--- BOTÃO DIREITO DO MOUSE
+-- INPUT GLOBAL / KEYBINDS
 --========================================================--
 
-trackConnection(
-	UserInputService.InputBegan:
-		Connect(
-			function(
-				input,
-				gameProcessed
-			)
+trackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if destroyed then
+		return
+	end
 
-				--------------------------------------------------
-				-- DEFINIR NOVA TECLA DO AIMLOCK
-				--------------------------------------------------
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		if not gameProcessed then
+			rightMouseHeld = true
+		end
+		return
+	end
 
-				if waitingAimKeybind then
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then
+		return
+	end
 
-					if input.UserInputType
-						==
-						Enum.UserInputType.Keyboard
-					then
+	local keyCode = input.KeyCode
 
-						if input.KeyCode
-							==
-							Enum.KeyCode.Escape
-						then
+	if waitingAimKeybind then
+		if keyCode == Enum.KeyCode.Escape then
+			waitingAimKeybind = false
+		else
+			AIM_TOGGLE_KEY = keyCode
+			waitingAimKeybind = false
+		end
+		updateInterface()
+		return
+	end
 
-							-- ESC apenas cancela a troca de tecla.
-							waitingAimKeybind =
-								false
+	if waitingHubKeybind then
+		if keyCode == Enum.KeyCode.Escape then
+			waitingHubKeybind = false
+		else
+			HUB_TOGGLE_KEY = keyCode
+			waitingHubKeybind = false
+		end
+		updateInterface()
+		return
+	end
 
-						else
+	if gameProcessed or UserInputService:GetFocusedTextBox() then
+		return
+	end
 
-							AIM_TOGGLE_KEY =
-								input.KeyCode
+	-- O atalho de visibilidade tem prioridade caso as duas teclas sejam iguais.
+	if keyCode == HUB_TOGGLE_KEY then
+		toggleHubVisible()
+		return
+	end
 
-							waitingAimKeybind =
-								false
+	if keyCode == AIM_TOGGLE_KEY then
+		toggleAimLock()
+	end
+end))
 
-						end
+--========================================================--
+-- MONITORAMENTO GUNDROP POR EVENTOS
+--========================================================--
 
-						updateInterface()
+trackConnection(workspace.DescendantAdded:Connect(function(object)
+	if destroyed or not gunDropESPEnabled then
+		return
+	end
 
-						return
-
-					end
-
-				end
-
-				if gameProcessed then
-					return
-				end
-
-				--------------------------------------------------
-				-- ATIVAR / DESATIVAR AIMLOCK PELA TECLA
-				--------------------------------------------------
-
-				if input.UserInputType
-					==
-					Enum.UserInputType.Keyboard
-					and input.KeyCode
-						==
-						AIM_TOGGLE_KEY
-				then
-
-					toggleAimlock()
-
-					return
-
-				end
-
-				--------------------------------------------------
-				-- BOTÃO DIREITO PARA TRAVAR NO ALVO
-				--------------------------------------------------
-
-				if input.UserInputType
-					==
-					Enum.UserInputType.MouseButton2
-				then
-
-					rightMouseHeld =
-						true
-
-				end
-
+	if object.Name == "GunDrop" then
+		task.defer(function()
+			if gunDropESPEnabled and isValidGunDrop(object) then
+				registerGunDrop(object)
+				updateInterface()
 			end
-		)
-)
+		end)
+	end
+end))
 
-
-trackConnection(
-	UserInputService.InputEnded:
-		Connect(
-			function(input)
-
-				if input.UserInputType
-					==
-					Enum.UserInputType.MouseButton2
-				then
-
-					rightMouseHeld =
-						false
-
-					UserInputService.MouseBehavior =
-						Enum.MouseBehavior.Default
-
-				end
-
+trackConnection(workspace.DescendantRemoving:Connect(function(object)
+	if GunDropEntries[object] then
+		unregisterGunDrop(object)
+		task.defer(function()
+			if gunDropESPEnabled then
+				findReplacementGunDrop()
+				updateInterface()
 			end
-		)
-)
+		end)
+	end
+end))
 
 --========================================================--
--- LOOP HITBOX
+-- LOOPS LEVES
 --========================================================--
 
-trackConnection(
-	RunService.RenderStepped:
-		Connect(
-			function()
+local hitboxTimer = 0
+local playerESPTimer = 0
+local gunDropTimer = 0
 
-				if destroyed
-					or not hitboxEnabled
-				then
-					return
-				end
+trackConnection(RunService.Heartbeat:Connect(function(deltaTime)
+	if destroyed then
+		return
+	end
 
-				for _, player
-					in ipairs(
-						Players:GetPlayers()
-					)
-				do
+	hitboxTimer = hitboxTimer + deltaTime
+	playerESPTimer = playerESPTimer + deltaTime
+	gunDropTimer = gunDropTimer + deltaTime
 
-					if player ~= LocalPlayer then
-
-						pcall(
-							function()
-
-								applyHitbox(
-									player
-								)
-
-							end
-						)
-
-					end
-
-				end
-
+	if hitboxEnabled and hitboxTimer >= HITBOX_UPDATE_INTERVAL then
+		hitboxTimer = 0
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= LocalPlayer then
+				pcall(function()
+					applyHitbox(player)
+				end)
 			end
-		)
-)
+		end
+	end
 
---========================================================--
--- LOOP ESP
---========================================================--
-
-local espTimer = 0
-
-
-trackConnection(
-	RunService.Heartbeat:
-		Connect(
-			function(deltaTime)
-
-				if destroyed then
-					return
-				end
-
-				espTimer =
-					espTimer
-					+
-					deltaTime
-
-				if espTimer < 0.1 then
-					return
-				end
-
-				espTimer = 0
-
-				if gunDropESPEnabled then
-
-					updateGunDropESP()
-					updateInterface()
-
-				end
-
-				if not espNameEnabled
-					and not espDistanceEnabled
-				then
-					return
-				end
-
-				for _, player
-					in ipairs(
-						Players:GetPlayers()
-					)
-				do
-
-					if player ~= LocalPlayer then
-
-						pcall(
-							function()
-
-								updateESP(
-									player
-								)
-
-							end
-						)
-
-					end
-
-				end
-
+	if (espNameEnabled or espDistanceEnabled) and playerESPTimer >= PLAYER_ESP_UPDATE_INTERVAL then
+		playerESPTimer = 0
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= LocalPlayer then
+				pcall(function()
+					updatePlayerESP(player)
+				end)
 			end
-		)
-)
+		end
+	end
+
+	if gunDropESPEnabled and gunDropTimer >= GUNDROP_DISTANCE_UPDATE_INTERVAL then
+		gunDropTimer = 0
+		updateGunDropDistances()
+	end
+end))
 
 --========================================================--
--- AIMLOCK
+-- AIMLOCK RENDER
 --========================================================--
 
-local AIM_RENDER_NAME =
-	"B1tSampl3_AimLock"
-
+local AIM_RENDER_NAME = "B1tSampl3_AimLock"
 
 RunService:BindToRenderStep(
-
 	AIM_RENDER_NAME,
-
 	Enum.RenderPriority.Camera.Value + 1,
-
 	function()
-
-		if destroyed then
+		if destroyed or not aimlockEnabled or not rightMouseHeld then
 			return
 		end
 
-		if not aimlockEnabled
-			or not rightMouseHeld
-		then
-			return
-		end
-
-		if not selectedTarget
-			or not selectedTarget.Parent
-		then
-
-			selectedTarget =
-				nil
-
-			UserInputService.MouseBehavior =
-				Enum.MouseBehavior.Default
-
+		if not selectedTarget or not selectedTarget.Parent then
+			selectedTarget = nil
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 			updateInterface()
-
-			return
-
-		end
-
-		local localCharacter =
-			LocalPlayer.Character
-
-		local targetCharacter =
-			selectedTarget.Character
-
-		if not localCharacter
-			or not targetCharacter
-		then
 			return
 		end
 
-		local localRoot =
-			localCharacter:
-			FindFirstChild(
-				"HumanoidRootPart"
-			)
+		local localCharacter = LocalPlayer.Character
+		local targetCharacter = selectedTarget.Character
+		if not localCharacter or not targetCharacter then
+			return
+		end
 
-		local targetRoot =
-			targetCharacter:
-			FindFirstChild(
-				"HumanoidRootPart"
-			)
+		local localRoot = localCharacter:FindFirstChild("HumanoidRootPart")
+		local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
+		local targetHead = targetCharacter:FindFirstChild("Head")
+		local humanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
 
-		local targetHead =
-			targetCharacter:
-			FindFirstChild(
-				"Head"
-			)
-
-		local humanoid =
-			targetCharacter:
-			FindFirstChildOfClass(
-				"Humanoid"
-			)
-
-		if not localRoot
-			or not targetRoot
-			or not targetHead
-			or not humanoid
-		then
+		if not localRoot or not targetRoot or not targetHead or not humanoid then
 			return
 		end
 
@@ -3322,215 +1652,100 @@ RunService:BindToRenderStep(
 			return
 		end
 
-		local distance =
-			(
-				localRoot.Position
-				-
-				targetRoot.Position
-			).Magnitude
-
-		if distance >
-			AIM_MAX_DISTANCE
-		then
-
-			UserInputService.MouseBehavior =
-				Enum.MouseBehavior.Default
-
+		local distance = (localRoot.Position - targetRoot.Position).Magnitude
+		if distance > AIM_MAX_DISTANCE then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 			return
-
 		end
 
-		UserInputService.MouseBehavior =
-			Enum.MouseBehavior.LockCenter
-
-		Camera =
-			workspace.CurrentCamera
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		Camera = workspace.CurrentCamera
 
 		if Camera then
-
-			local cameraPosition =
-				Camera.CFrame.Position
-
-			Camera.CFrame =
-				CFrame.lookAt(
-
-					cameraPosition,
-
-					targetHead.Position
-
-				)
-
+			local cameraPosition = Camera.CFrame.Position
+			Camera.CFrame = CFrame.lookAt(cameraPosition, targetHead.Position)
 		end
-
 	end
-
 )
 
 --========================================================--
 -- PLAYERS ENTRANDO / SAINDO
 --========================================================--
 
-trackConnection(
-	Players.PlayerAdded:
-		Connect(
-			function()
+trackConnection(Players.PlayerAdded:Connect(function()
+	if PlayerList.Visible then
+		task.defer(refreshPlayerList)
+	end
+end))
 
-				if PlayerList.Visible then
+trackConnection(Players.PlayerRemoving:Connect(function(player)
+	removePlayerESP(player)
 
-					task.defer(
-						refreshPlayerList
-					)
+	if selectedTarget == player then
+		selectedTarget = nil
+		rightMouseHeld = false
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		updateInterface()
+	end
 
-				end
-
-			end
-		)
-)
-
-
-trackConnection(
-	Players.PlayerRemoving:
-		Connect(
-			function(player)
-
-				if selectedTarget
-					==
-					player
-				then
-
-					selectedTarget =
-						nil
-
-					rightMouseHeld =
-						false
-
-					UserInputService.MouseBehavior =
-						Enum.MouseBehavior.Default
-
-					updateInterface()
-
-				end
-
-				if PlayerList.Visible then
-
-					task.defer(
-						refreshPlayerList
-					)
-
-				end
-
-			end
-		)
-)
+	if PlayerList.Visible then
+		task.defer(refreshPlayerList)
+	end
+end))
 
 --========================================================--
--- LIMPEZA
+-- LIMPEZA COMPLETA / DESTROY HUB
 --========================================================--
 
 local function cleanup()
-
 	if destroyed then
 		return
 	end
 
-	destroyed =
-		true
+	destroyed = true
+	hitboxEnabled = false
+	espNameEnabled = false
+	espDistanceEnabled = false
+	gunDropESPEnabled = false
+	aimlockEnabled = false
+	rightMouseHeld = false
+	waitingAimKeybind = false
+	waitingHubKeybind = false
 
-	hitboxEnabled =
-		false
+	pcall(function()
+		RunService:UnbindFromRenderStep(AIM_RENDER_NAME)
+	end)
 
-	espNameEnabled =
-		false
-
-	espDistanceEnabled =
-		false
-
-	gunDropESPEnabled =
-		false
-
-	aimlockEnabled =
-		false
-
-	waitingAimKeybind =
-		false
-
-	rightMouseHeld =
-		false
-
-	pcall(
-		function()
-
-			RunService:
-				UnbindFromRenderStep(
-					AIM_RENDER_NAME
-				)
-
-		end
-	)
-
-	UserInputService.MouseBehavior =
-		Enum.MouseBehavior.Default
+	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 
 	restoreAllHitboxes()
+	removeAllPlayerESP()
+	clearAllGunDrops()
 
-	removeAllESP()
-
-	removeGunDropESP()
-
-	for _, connection
-		in ipairs(
-			Connections
-		)
-	do
-
-		pcall(
-			function()
-
-				connection:
-					Disconnect()
-
-			end
-		)
-
+	for _, connection in ipairs(Connections) do
+		pcall(function()
+			connection:Disconnect()
+		end)
 	end
 
-	table.clear(
-		Connections
-	)
+	Connections = {}
 
-	if ScreenGui
-		and ScreenGui.Parent
-	then
-
-		ScreenGui:
-			Destroy()
-
+	if ScreenGui and ScreenGui.Parent then
+		ScreenGui:Destroy()
 	end
 
+	_G.__B1tSampl3HubCleanup = nil
 end
 
+_G.__B1tSampl3HubCleanup = cleanup
 
-_G.__B1tSampl3HubCleanup =
-	cleanup
-
---========================================================--
--- FECHAR
---========================================================--
-
-trackConnection(
-	CloseButton
-		.MouseButton1Click:
-		Connect(
-			function()
-
-				cleanup()
-
-			end
-		)
-)
+trackConnection(DestroyHubButton.MouseButton1Click:Connect(function()
+	cleanup()
+end))
 
 --========================================================--
 -- INICIALIZAÇÃO
 --========================================================--
 
+showTab("ESP")
 updateInterface()
