@@ -197,6 +197,99 @@ end
 -- ESP
 --========================================================--
 
+--========================================================--
+-- DETECTAR ARMA / FACA NO CHARACTER
+-- Gun   = azul
+-- Knife = vermelho
+-- Nenhum = verde
+--========================================================--
+
+local function getPlayerWeaponColor(player)
+
+	local character =
+		player.Character
+
+	if not character then
+
+		return Color3.fromRGB(
+			0,
+			255,
+			100
+		)
+
+	end
+
+	local hasGun =
+		false
+
+	local hasKnife =
+		false
+
+	-- Procura Tools dentro do Model/Character do player na Workspace.
+	-- Isso detecta as ferramentas que estão atualmente equipadas.
+	for _, object
+		in ipairs(
+			character:GetDescendants()
+		)
+	do
+
+		if object:IsA(
+			"Tool"
+		) then
+
+			if object.Name
+				==
+				"Gun"
+			then
+
+				hasGun =
+					true
+
+			elseif object.Name
+				==
+				"Knife"
+			then
+
+				hasKnife =
+					true
+
+			end
+
+		end
+
+	end
+
+	-- Se houver as duas Tools ao mesmo tempo,
+	-- Gun tem prioridade e mantém o nome azul.
+	if hasGun then
+
+		return Color3.fromRGB(
+			0,
+			170,
+			255
+		)
+
+	end
+
+	if hasKnife then
+
+		return Color3.fromRGB(
+			255,
+			60,
+			60
+		)
+
+	end
+
+	return Color3.fromRGB(
+		0,
+		255,
+		100
+	)
+
+end
+
+
 local function getESP(player)
 
 	local character =
@@ -333,10 +426,8 @@ local function createESP(player)
 		"]"
 
 	NameLabel.TextColor3 =
-		Color3.fromRGB(
-			0,
-			255,
-			100
+		getPlayerWeaponColor(
+			player
 		)
 
 	NameLabel.TextStrokeColor3 =
@@ -504,6 +595,13 @@ local function updateESP(player)
 			player.Name
 			..
 			"]"
+
+		-- Atualiza a cor do nome em tempo real:
+		-- Gun = azul | Knife = vermelho | sem arma = verde
+		NameLabel.TextColor3 =
+			getPlayerWeaponColor(
+				player
+			)
 
 	end
 
